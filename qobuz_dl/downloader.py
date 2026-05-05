@@ -750,18 +750,28 @@ class Download:
         quality_met = True
         
         try:
+                     
+            # FIX PRINCIPALE: Inizializziamo sempre una variabile interna
             new_track_dict = (
                 self.client.get_track_url(track_dict["id"], fmt_id=self.quality)
                 if not track_url_dict
                 else track_url_dict
             )
+            
+            # Se la chiamata API non ha restituito un dizionario valido (es. None), forziamo l'eccezione
+            if not new_track_dict:
+                 raise KeyError("No URL dict returned by API")
+
             restrictions = new_track_dict.get("restrictions")
             if isinstance(restrictions, list):
                 if any(restriction.get("code") == QL_DOWNGRADE for restriction in restrictions):
                     quality_met = False
 
             return ("FLAC", quality_met, new_track_dict["bit_depth"], new_track_dict["sampling_rate"])
-        except (KeyError, requests.exceptions.HTTPError):
+            
+        except (KeyError, requests.exceptions.HTTPError, Exception):
+            # In caso di errore (geoblocco, traccia non disponibile, ecc.), restituiamo i valori None
+            # in modo che il downloader "salti" la traccia senza mandare in crash l'intero loop.
             return ("Unknown", quality_met, None, None)
 
     def _determine_formats(self, album_meta, album_attr, tracks_meta, track_attr, is_track, file_format, settings: QobuzDLSettings):
