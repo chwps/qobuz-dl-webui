@@ -14,7 +14,7 @@ Search, explore, and download Lossless and Hi-Res music from [Qobuz](https://www
 * **Native Multi-Artist Tagging:** Automatically detects and splits main artists and featured guests. Unlike standard downloaders, it writes discrete multiple tags for FLAC files (Vorbis Comments) and standard null-separated strings for MP3s (ID3v2), ensuring flawless interpretation by high-end players like Roon, Plexamp, or Kodi without requiring external tools like MusicBrainz Picard.
 * **Native ReplayGain Support:** Automatically extracts and embeds `REPLAYGAIN_TRACK_GAIN` and `REPLAYGAIN_TRACK_PEAK` tags directly from Qobuz's hidden API data. This ensures perfect, non-destructive volume leveling out-of-the-box for high-end digital audio players (DAPs) and audiophile servers like Roon.
 * **Automatic Lyrics Engine & Retroactive Tagger:** Fetches and injects synchronized (`.lrc`) and unsynchronized lyrics using LRCLIB (with a Genius fallback API). Includes a standalone `lyrics` command to retroactively scan and inject missing lyrics into your existing local library without re-downloading the audio.
-* **Enhanced Digital Booklets:** Automatically compiles a beautifully formatted `.txt` file with a complete tracklist, runtime, full credits, metadata, and reviews. Upon completion, the engine intelligently sweeps the folder, strips timestamps from `.lrc` files, and appends the pure text lyrics of the entire album directly into the booklet. Official PDF "Goodies" are also downloaded alongside it.
+* **Enhanced Digital Booklets:** Automatically compiles a beautifully formatted `.txt` file with a complete tracklist, runtime, full credits, metadata, and reviews. Upon completion, the engine intelligently sweeps the folder, strips timestamps from `.lrc` files, and appends the pure text lyrics of the entire album directly into the booklet. Official PDF "Goodies" are also downloaded alongside it. **You can now use the `--booklet-only` flag to exclusively download these metadata files, cover art, and PDFs while gracefully skipping all heavy audio tracks.**
 
 ### 🚀 Resilient Download Engine
 * **Bulletproof Queue:** Advanced track-level exception handling. If a single track is geo-blocked or missing from the servers (404 error), the engine gracefully skips it and seamlessly continues downloading the rest of your album or playlist without crashing.
@@ -166,7 +166,7 @@ usage: python -m qobuz_dl dl [-h] [-d PATH] [-q int] [--albums-only] [--no-m3u] 
                              [--embedded-art-size {50,100,150,300,600,max,org}] 
                              [--saved-art-size {50,100,150,300,600,max,org}] 
                              [--multiple-disc-prefix PREFIX] [--multiple-disc-one-dir] 
-                             [--no-lyrics] [--no-lrc-files] [--native-lang] [--no-credits] [--with-credits] [--delay SECONDS]
+                             [--no-lyrics] [--no-lrc-files] [--native-lang] [--no-credits] [--with-credits] [--booklet-only] [--delay SECONDS]
                              [--no-album-artist-tag] [--no-track-composer-tag] ... 
                              SOURCE [SOURCE ...]
 ```
@@ -205,6 +205,12 @@ python -m qobuz_dl dl <URL> --delay 1
 If you have set `no_credits = true` in your `config.ini` to keep your folders clean, you can temporarily override this behavior to force the generation of the Digital Booklet and Tracklist.txt for a specific masterpiece.
 ```bash
 python -m qobuz_dl dl <URL> --with-credits
+```
+
+**Metadata & Booklet Only Mode:**
+Want to complete your library's metadata without downloading gigabytes of audio? This command fetches only the cover art, generates the Tracklist/Credits booklet, downloads official PDF Goodies, and gracefully skips all audio tracks.
+```bash
+python -m qobuz_dl dl [https://play.qobuz.com/album/qxjbxh1dc3xyb](https://play.qobuz.com/album/qxjbxh1dc3xyb) --booklet-only
 ```
 
 **Minimalist Folder Mode (No external .lrc files):**

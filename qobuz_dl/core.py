@@ -67,6 +67,7 @@ class QobuzDL:
         force_english=True,
         no_credits=False,
         settings: QobuzDLSettings = None,
+        booklet_only: bool = False,
     ):
         self.directory = create_and_return_dir(directory)
         self.quality = quality
@@ -88,6 +89,7 @@ class QobuzDL:
         self.force_english = force_english
         self.no_credits = no_credits
         self.settings = settings or QobuzDLSettings()
+        self.booklet_only = booklet_only
 
     def initialize_client(self, email, pwd, app_id, secrets):
         self.client = qopy.Client(email, pwd, app_id, secrets, self.settings.user_auth_token, force_english=self.force_english)
@@ -127,7 +129,8 @@ class QobuzDL:
                 self.settings,
                 self.downloads_db,
                 is_playlist=is_playlist,
-                playlist_track_number=playlist_index
+                playlist_track_number=playlist_index,
+                booklet_only=self.booklet_only,
             )
             dloader.download_id_by_type(not album)
         except (requests.exceptions.RequestException, NonStreamable) as e:

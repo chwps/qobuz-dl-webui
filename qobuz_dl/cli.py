@@ -423,6 +423,7 @@ def main():
         force_english=force_english,
         no_credits=no_credits_flag,
         settings=settings,
+        booklet_only=getattr(arguments, 'booklet_only', False),
     )
     
     qobuz.initialize_client(email, password, app_id, secrets)

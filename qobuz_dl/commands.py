@@ -198,6 +198,11 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         help="disable automatic lyrics fetching and injection for this session",
     )
     custom_parser.add_argument(
+        "--booklet-only",
+        action="store_true",
+        help="only download the Digital Booklet and PDF Goodies (skips audio files)",
+    )
+    custom_parser.add_argument(
         "--native-lang",
         action="store_true",
         help="do not force English; download metadata in the account's native language",

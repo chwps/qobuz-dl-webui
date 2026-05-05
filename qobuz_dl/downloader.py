@@ -128,7 +128,8 @@ class Download:
         settings: QobuzDLSettings = None,
         download_db=None,
         is_playlist: bool = False,           
-        playlist_track_number: int = None,   
+        playlist_track_number: int = None, 
+        booklet_only: bool = False,        
     ):
         self.client = client
         self.item_id = item_id
@@ -141,7 +142,8 @@ class Download:
         self.no_cover = no_cover
         self.folder_format = folder_format or DEFAULT_FOLDER
         self.track_format = track_format or DEFAULT_TRACK
-        self.no_credits = no_credits 
+        self.no_credits = no_credits
+        self.booklet_only = booklet_only        
 
         self.fetch_lyrics = fetch_lyrics
         if self.fetch_lyrics:
@@ -278,7 +280,18 @@ class Download:
 
             if "goodies" in album_meta:
                 _download_goodies(album_meta, dirn)
-
+                
+            if getattr(self, 'booklet_only', False):
+                safe_print(f"{YELLOW}[*] --booklet-only flag active. Skipping audio tracks.{OFF}")
+                
+                if is_standard_album and working_dirn == inprogress_dirn:
+                    try:
+                        os.rename(working_dirn, incomplete_dirn)
+                    except OSError as e:
+                        logger.warning(f"{YELLOW}[!] Impossibile rinominare la cartella in [INCOMPLETE]. ({e}){OFF}")
+                
+                return
+             
             with concurrent.futures.ThreadPoolExecutor(max_workers=active_workers) as executor:
                 futures = []
                 for i in album_meta["tracks"]["items"]:
