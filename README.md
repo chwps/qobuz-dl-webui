@@ -3,7 +3,7 @@
 
 Search, explore, and download Lossless and Hi-Res music from [Qobuz](https://www.qobuz.com/).
 
-**This is an enhanced, feature-rich fork of the original qobuz-dl project, designed for the ultimate audiophile experience. It includes a resilient download engine, deep customization for keeping your library perfectly organized, and extensive, native support for classical music metadata.**
+**This is an enhanced, feature-rich fork of the original qobuz-dl project, designed for the ultimate audiophile experience. It includes a resilient download engine with smart anti-spam filtering, deep customization for keeping your library perfectly organized, and extensive, native support for classical music metadata.**
 
 ## ✨ Features
 
@@ -32,6 +32,7 @@ Search, explore, and download Lossless and Hi-Res music from [Qobuz](https://www
 * **Anti-Ban Stealth Spoofing:** Modern WAF (Web Application Firewalls) block API requests originating from headless scripts. This engine features full cryptographic stealth spoofing, injecting exact Windows/Chrome Client Hints (`Sec-Ch-Ua`, `Sec-Fetch-Site`) to make your session completely indistinguishable from a legitimate user navigating the Qobuz Web Player, significantly reducing 403 errors and preventing account bans.
 * **Limitless Playlists:** Overcomes Qobuz API restrictions by dynamically paginating chunk requests, allowing you to seamlessly queue and download massive playlists without the standard 50-track bottleneck.
 * **Smart Resume (No Overwrites):** Intelligently detects existing files on your local drive and automatically skips them. If a massive discography download gets interrupted, it resumes instantly without wasting time or bandwidth re-downloading existing tracks.
+* **Anti-Spam Blacklist Engine:** Automatically filter out unwanted "junk" releases (e.g., Karaoke versions, Instrumental Covers, Tribute albums) when downloading massive artist discographies or label catalogs. You can pass a `.txt` file containing your custom keywords (e.g., `Karaoke`, `(Live)`, `Original Soundtrack`) via the CLI flag `-b` or permanently set it in your `config.ini`. The engine dynamically joins the main title and version tags, ensuring flawless filtering before a single byte of audio is downloaded.
 * **Stateful Batch Downloading (Text File Memory):** When downloading massive queues from a `.txt` file, the engine acts as a living database. It automatically validates URLs and appends a `[DONE]` tag next to completed links directly inside your text file. If your connection drops or you abort the process, simply re-run the command: the engine will instantly skip the completed links and seamlessly resume the queue exactly where it left off.
 * **Flawless `.m3u` Generation:** Automatically generates playlist files with correct relative folder paths. **v2.0.1 features a robust 4-pass matching algorithm** (ID -> ISRC -> Title -> Filename) that guarantees the `.m3u` file perfectly mirrors the API order, even when tracks have no numerical prefixes in their filenames.
 * **Ultra-Fast O(1) Matching Engine:** The playlist generator now uses high-performance dictionary indexing. It identifies local files instantly, reducing the processing time for massive playlists from seconds to milliseconds. (Thanks to marrobHD)
@@ -164,6 +165,7 @@ usage: python -m qobuz_dl [-h] [-r] [-p] [--sync-db [PATH]] [-sc] {interactive,i
 [Download Usage]
 usage: python -m qobuz_dl dl [-h] [-d PATH] [-q int] [--albums-only] [--no-m3u] [--no-fallback] [--no-db] 
                              [-ff PATTERN] [-tf PATTERN] [-s] [-e] [--no-cover]
+                             [-b PATH]
                              [--embedded-art-size {50,100,150,300,600,max,org}] 
                              [--saved-art-size {50,100,150,300,600,max,org}] 
                              [--multiple-disc-prefix PREFIX] [--multiple-disc-one-dir] 
@@ -194,6 +196,13 @@ Do you have a massive list of releases to download? Create a standard text file 
 *Ultimate Edition Feature:* The text file acts as a living database. As soon as a release or a full playlist is successfully downloaded, the engine appends a `[DONE]` tag next to its URL in the file. If your connection drops or you interrupt the process (`CTRL+C`), simply re-run the exact same command and the engine will instantly skip the completed links and seamlessly resume exactly where it left off.
 ```bash
 python -m qobuz_dl dl list.txt
+```
+
+**Discography Blacklist & Anti-Spam Mode:**
+Downloading a massive artist discography but want to avoid wasting space on Karaoke, Tribute, or Instrumental versions? Create a text file (e.g., `blacklist.txt`) containing your unwanted keywords (one per line) and pass it to the engine. It will automatically inspect every release and seamlessly skip the junk!
+*(Tip: You can set `blacklist = blacklist.txt` in your `config.ini` to make this automatic for every download).*
+```bash
+python -m qobuz_dl dl [https://play.qobuz.com/artist/123456](https://play.qobuz.com/artist/123456) -b blacklist.txt
 ```
 
 **Ultimate Anti-Ban Mode (Stealth + Delay):**
