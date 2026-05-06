@@ -54,6 +54,17 @@ def dl_args(subparsers):
         nargs="+",
         help=("one or more URLs (space separated) or a text file"),
     )
+    
+    # --- START BLACKLIST FLAG ---
+    download.add_argument(
+        "-b",
+        "--blacklist",
+        help="Path to a text file containing keywords to blacklist and skip",
+        type=str,
+        default=None,
+    )
+    # --- END BLACKLIST FLAG ---
+    
     return download
 
 def lyrics_args(subparsers):

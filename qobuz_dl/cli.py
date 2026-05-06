@@ -296,6 +296,7 @@ def main():
         legacy_charmap = config.getboolean(section, "legacy_charmap", fallback=False)
         
         no_credits_config = config.getboolean(section, "no_credits", fallback=False)
+        blacklist_config = config.get(section, "blacklist", fallback=None)
         
         app_id = config.get(section, "app_id")
         secrets = [s for s in config.get(section, "secrets").split(",") if s]
@@ -424,6 +425,7 @@ def main():
         no_credits=no_credits_flag,
         settings=settings,
         booklet_only=getattr(arguments, 'booklet_only', False),
+        blacklist=getattr(arguments, 'blacklist', None) or blacklist_config,
     )
     
     qobuz.initialize_client(email, password, app_id, secrets)

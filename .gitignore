@@ -23,3 +23,6 @@ dist/
 # Windows executables
 *.exe
 *.spec
+
+# User configuration and local testing files
+blacklist.txt

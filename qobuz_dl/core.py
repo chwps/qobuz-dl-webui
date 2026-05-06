@@ -68,8 +68,38 @@ class QobuzDL:
         no_credits=False,
         settings: QobuzDLSettings = None,
         booklet_only: bool = False,
+        blacklist=None,
     ):
         self.directory = create_and_return_dir(directory)
+        self.quality = quality
+        self.embed_art = embed_art
+        self.lucky_limit = lucky_limit
+        self.lucky_type = lucky_type
+        self.interactive_limit = interactive_limit
+        self.ignore_singles_eps = ignore_singles_eps
+        self.no_m3u_for_playlists = no_m3u_for_playlists
+        self.quality_fallback = quality_fallback
+        self.cover_og_quality = cover_og_quality
+        self.no_cover = no_cover
+        self.downloads_db = create_db(downloads_db) if downloads_db else None
+        self.folder_format = folder_format
+        self.track_format = track_format
+        self.smart_discography = smart_discography
+        self.fetch_lyrics = fetch_lyrics
+        self.genius_token = genius_token
+        self.force_english = force_english
+        self.no_credits = no_credits
+        self.settings = settings or QobuzDLSettings()
+        self.booklet_only = booklet_only
+        
+        self.blacklist_patterns = []
+        if blacklist and os.path.isfile(blacklist):
+            try:
+                with open(blacklist, "r", encoding="utf-8") as f:
+                    self.blacklist_patterns = [line.strip().lower() for line in f if line.strip() and not line.startswith("#")]
+                logger.info(f"{YELLOW}[*] Blacklist loaded: {len(self.blacklist_patterns)} patterns active.{OFF}")
+            except Exception as e:
+                logger.error(f"{RED}[!] Failed to load blacklist: {e}{OFF}")
         self.quality = quality
         self.embed_art = embed_art
         self.lucky_limit = lucky_limit
@@ -206,6 +236,17 @@ class QobuzDL:
 
             # Use enumerate to get the track number in the playlist (1, 2, 3...)
             for idx, item in enumerate(items, start=1):
+                
+                if getattr(self, 'blacklist_patterns', None):
+                    base_title = item.get("title") or item.get("name") or ""
+                    version_tag = item.get("version") or ""
+                    
+                    display_name = f"{base_title} ({version_tag})" if version_tag else base_title
+                    
+                    if any(pattern in display_name.lower() for pattern in self.blacklist_patterns):
+                        logger.info(f"{YELLOW}[!] Skipped (Blacklisted): {display_name}{OFF}")
+                        continue
+
                 self.download_from_id(
                     item["id"],
                     True if type_dict["iterable_key"] == "albums" else False,
