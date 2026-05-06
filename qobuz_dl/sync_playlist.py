@@ -158,7 +158,9 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
         logger.info(f"\n{GREEN}Tracks to DOWNLOAD:{OFF}")
         for tid in sorted(to_download_ids):
             item = remote_ids[tid]
-            artist = item.get("performer", {}).get("name", "Unknown")
+            album_artist = item.get("album", {}).get("artist", {}).get("name")
+            performer_name = item.get("performer", {}).get("name", "Unknown")
+            artist = performer_name if album_artist in [None, "Various Artists"] else album_artist
             title = item.get("title", "Unknown")
             logger.info(f"  {GREEN}↓ {artist} — {title}{OFF}")
 

@@ -613,7 +613,10 @@ class Download:
             safe_print(f"{RED}[!] Error tagging: {e}{OFF}")
 
         if getattr(self, 'fetch_lyrics', False) and hasattr(self, 'lyrics_engine') and not abort_event.is_set():
-            search_artist = _safe_get(track_metadata, "performer", "name") or _safe_get(album_or_track_metadata, "artist", "name", default="Unknown")
+            album_artist = _safe_get(track_metadata, "album", "artist", "name")
+            performer_name = _safe_get(track_metadata, "performer", "name") or _safe_get(track_metadata, "artist", "name", default="Unknown")
+            search_artist = performer_name if album_artist in [None, "Various Artists"] else album_artist
+
             search_album = _safe_get(track_metadata, "album", "title", default="")
             
             with print_lock:

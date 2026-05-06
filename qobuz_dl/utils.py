@@ -128,7 +128,9 @@ def make_m3u(pl_directory, remote_items=None):
             tid = str(item.get("id", ""))
             isrc = str(item.get("isrc", ""))
             track_title = item.get("title", "Unknown Title")
-            performer_name = item.get("performer", {}).get("name", "Unknown Performer")
+            album_artist = item.get("album", {}).get("artist", {}).get("name")
+            performer_name = item.get("performer", {}).get("name", "Unknown Artist")
+            final_artist = performer_name if album_artist in [None, "Various Artists"] else album_artist
             
             # Pass 1-3: Fast dictionary lookups
             best_match = by_tid.get(tid) or by_isrc.get(isrc) or by_title.get(track_title.strip().lower())
@@ -147,7 +149,7 @@ def make_m3u(pl_directory, remote_items=None):
             else:
                 if missing_count == 0:
                     logger.warning(table_header)
-                row = f"{track_title[:35]:<35} │ {performer_name[:25]:<25} │ {tid:<12}"
+                row = f"{track_title[:35]:<35} │ {final_artist[:25]:<25} │ {tid:<12}"
                 logger.warning(f"{YELLOW}{row}{OFF}")
                 missing_count += 1
                 
