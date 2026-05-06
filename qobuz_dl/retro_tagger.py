@@ -40,7 +40,9 @@ def inject_lyrics_retroactively(directory_path, genius_token=None):
                             continue
                             
                         title = audio.get("TITLE", [""])[0]
-                        artist = audio.get("ARTIST", [""])[0]
+                        album_artist = audio.get("ALBUMARTIST", [""])[0]
+                        performer_name = audio.get("ARTIST", ["Unknown Artist"])[0]
+                        artist = performer_name if album_artist in ["", "Various Artists"] else album_artist
                         album = audio.get("ALBUM", [""])[0]
                         needs_lyrics = True
                         
