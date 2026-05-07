@@ -121,3 +121,17 @@ def handle_download_id(db_path, item_id, add_id=False, media_type='album', quali
                 "SELECT id FROM downloads WHERE id=? AND quality=?",
                 (item_id, quality),
             ).fetchone()
+ 
+ 
+def get_stats(db_path):
+    """Returns a list of unique artists from the database."""
+    if not db_path:
+        return []
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            # We select unique artists, excluding empty strings
+            cursor.execute("SELECT DISTINCT artist FROM downloads WHERE artist != '' ORDER BY artist ASC")
+            return [row[0] for row in cursor.fetchall()]
+    except sqlite3.Error:
+        return []            
