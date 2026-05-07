@@ -63,6 +63,7 @@ class QobuzDL:
         track_format="{track_number} - {track_title}",
         smart_discography=False,
         fetch_lyrics=False,
+        no_lrc_files=False,
         genius_token=None,
         force_english=True,
         no_credits=False,
@@ -86,6 +87,7 @@ class QobuzDL:
         self.track_format = track_format
         self.smart_discography = smart_discography
         self.fetch_lyrics = fetch_lyrics
+        self.no_lrc_files = no_lrc_files
         self.genius_token = genius_token
         self.force_english = force_english
         self.no_credits = no_credits
@@ -100,27 +102,7 @@ class QobuzDL:
                 logger.info(f"{YELLOW}[*] Blacklist loaded: {len(self.blacklist_patterns)} patterns active.{OFF}")
             except Exception as e:
                 logger.error(f"{RED}[!] Failed to load blacklist: {e}{OFF}")
-        self.quality = quality
-        self.embed_art = embed_art
-        self.lucky_limit = lucky_limit
-        self.lucky_type = lucky_type
-        self.interactive_limit = interactive_limit
-        self.ignore_singles_eps = ignore_singles_eps
-        self.no_m3u_for_playlists = no_m3u_for_playlists
-        self.quality_fallback = quality_fallback
-        self.cover_og_quality = cover_og_quality
-        self.no_cover = no_cover
-        self.downloads_db = create_db(downloads_db) if downloads_db else None
-        self.folder_format = folder_format
-        self.track_format = track_format
-        self.smart_discography = smart_discography
-        self.fetch_lyrics = fetch_lyrics
-        self.genius_token = genius_token
-        self.force_english = force_english
-        self.no_credits = no_credits
-        self.settings = settings or QobuzDLSettings()
-        self.booklet_only = booklet_only
-
+        
     def initialize_client(self, email, pwd, app_id, secrets):
         self.client = qopy.Client(email, pwd, app_id, secrets, self.settings.user_auth_token, force_english=self.force_english)
         logger.info(f"{YELLOW}Set max quality: {QUALITIES[int(self.quality)]}\n")
@@ -154,6 +136,7 @@ class QobuzDL:
                 self.folder_format,
                 self.track_format,
                 self.fetch_lyrics,
+                self.no_lrc_files,
                 self.genius_token,
                 self.no_credits, 
                 self.settings,

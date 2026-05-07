@@ -123,6 +123,7 @@ class Download:
         folder_format=None,
         track_format=None,
         fetch_lyrics: bool = False,
+        no_lrc_files: bool = False,
         genius_token: str = None,
         no_credits: bool = False,
         settings: QobuzDLSettings = None,
@@ -146,6 +147,7 @@ class Download:
         self.booklet_only = booklet_only        
 
         self.fetch_lyrics = fetch_lyrics
+        self.no_lrc_files = no_lrc_files
         if self.fetch_lyrics:
             self.lyrics_engine = LyricsEngine(genius_token)
 
@@ -619,13 +621,13 @@ class Download:
 
             search_album = _safe_get(track_metadata, "album", "title", default="")
             
-            with print_lock:
+            with print_lock:                           
                 self.lyrics_engine.fetch_and_inject(
                     file_path=final_file, 
                     artist=search_artist, 
                     track=track_title, 
                     album=search_album,
-                    save_lrc=self.settings.lrc_files
+                    save_lrc=not self.no_lrc_files
                 )
 
         delay_time = getattr(self.settings, 'delay', 0)

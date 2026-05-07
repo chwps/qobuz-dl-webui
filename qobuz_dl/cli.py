@@ -137,6 +137,9 @@ def _reset_config(config_file):
     config["qobuz"]["embed_art"] = "true"
     config["qobuz"]["no_cover"] = "false"
     config["qobuz"]["no_database"] = "false"
+    config["qobuz"]["no_lrc_files"] = "false"
+    config["qobuz"]["legacy_charmap"] = "false"
+    config["qobuz"]["blacklist"] = "blacklist.txt"
 
     logging.info(f"{YELLOW}Getting tokens. Please wait...{OFF}")
     bundle = Bundle()
@@ -287,6 +290,7 @@ def main():
         default_quality = config.get(section, "default_quality")
         
         no_m3u = config.getboolean(section, "no_m3u", fallback=False)
+        no_lrc_files_config = config.getboolean(section, "no_lrc_files", fallback=False)
         albums_only = config.getboolean(section, "albums_only", fallback=False)
         no_fallback = config.getboolean(section, "no_fallback", fallback=False)
         og_cover = config.getboolean(section, "og_cover", fallback=True)
@@ -296,7 +300,7 @@ def main():
         legacy_charmap = config.getboolean(section, "legacy_charmap", fallback=False)
         
         no_credits_config = config.getboolean(section, "no_credits", fallback=False)
-        blacklist_config = config.get(section, "blacklist", fallback=None)
+        blacklist_config = config.get(section, "blacklist", fallback="blacklist.txt")
         
         app_id = config.get(section, "app_id")
         secrets = [s for s in config.get(section, "secrets").split(",") if s]
@@ -420,6 +424,7 @@ def main():
         track_format=arguments.track_format or track_format,
         smart_discography=arguments.smart_discography or smart_discography,
         fetch_lyrics=fetch_lyrics,
+        no_lrc_files=("--no-lrc-files" in sys.argv) or no_lrc_files_config,
         genius_token=genius_token,
         force_english=force_english,
         no_credits=no_credits_flag,
