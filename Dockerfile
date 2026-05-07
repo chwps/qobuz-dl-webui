@@ -1,19 +1,22 @@
-# Usa una versione ufficiale e leggera di Python 3.11
 FROM python:3.11-slim
 
-# Installa FFmpeg (fondamentale per la tua Ultimate Edition)
-RUN apt-get update && \
-    apt-get install -y ffmpeg && \
-    rm -rf /var/lib/apt/lists/*
-
-# Imposta la cartella di lavoro dentro il contenitore
 WORKDIR /app
 
-# Copia tutti i file del tuo progetto dentro il contenitore
-COPY . .
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Installa le dipendenze e il programma stesso
-RUN pip install --no-cache-dir -r requirements.txt || pip install --no-cache-dir .
+# Install qobuz-dl from our fork
+RUN pip install --no-cache-dir git+https://github.com/chwps/qobuz-dl.git
 
-# Dichiara il comando di base (così l'utente deve solo passare gli argomenti come 'dl' o '--sync-db')
-ENTRYPOINT ["python", "-m", "qobuz_dl"]
+# WebUI deps
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY main.py .
+COPY index.html .
+
+EXPOSE 8080
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]

@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Qobuz-DL WebUI</title>
+<style>
+  :root {
+    --bg: #0f0f13; --surface: #1a1a24; --card: #22222e;
+    --primary: #6c5ce7; --primary-dim: #5a4bd1;
+    --accent: #fd79a8; --success: #00b894; --warn: #fdcb6e; --err: #e17055;
+    --text: #e8e8f0; --muted: #7f8c9b; --border: #2d2d3a;
+    --radius: 10px; --shadow: 0 4px 24px rgba(0,0,0,.4);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+
+  /* Header */
+  .header { background:var(--surface); border-bottom:1px solid var(--border); padding:16px 24px; display:flex; align-items:center; gap:16px; position:sticky; top:0; z-index:100; }
+  .header h1 { font-size:1.4rem; background:linear-gradient(135deg,var(--primary),var(--accent)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+  .header .status { margin-left:auto; display:flex; align-items:center; gap:8px; font-size:.85rem; color:var(--muted); }
+  .header .status .dot { width:8px; height:8px; border-radius:50%; background:var(--success); }
+  .header .status.offline .dot { background:var(--err); }
+
+  /* Layout */
+  .layout { display:flex; min-height:calc(100vh - 56px); }
+  .sidebar { width:220px; background:var(--surface); border-right:1px solid var(--border); padding:12px 0; flex-shrink:0; overflow-y:auto; }
+  .sidebar a { display:flex; align-items:center; gap:10px; padding:10px 20px; color:var(--muted); text-decoration:none; font-size:.9rem; transition:.15s; border-left:3px solid transparent; cursor:pointer; }
+  .sidebar a:hover { color:var(--text); background:rgba(108,92,231,.08); }
+  .sidebar a.active { color:var(--primary); border-left-color:var(--primary); background:rgba(108,92,231,.12); }
+  .sidebar a .icon { font-size:1.1rem; width:22px; text-align:center; }
+  .main { flex:1; padding:24px; overflow-y:auto; max-width:960px; }
+
+  /* Cards */
+  .card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:20px; margin-bottom:16px; }
+  .card h3 { font-size:1rem; margin-bottom:4px; display:flex; align-items:center; gap:8px; }
+  .card p { font-size:.82rem; color:var(--muted); margin-bottom:14px; line-height:1.5; }
+
+  /* Form */
+  label { display:block; font-size:.82rem; color:var(--muted); margin-bottom:4px; }
+  input[type=text], input[type=number], select, textarea {
+    width:100%; padding:8px 12px; background:var(--surface); border:1px solid var(--border);
+    border-radius:6px; color:var(--text); font-size:.88rem; outline:none; transition:.15s;
+  }
+  input:focus, select:focus, textarea:focus { border-color:var(--primary); box-shadow:0 0 0 2px rgba(108,92,231,.2); }
+  textarea { resize:vertical; min-height:60px; font-family:inherit; }
+  .field { margin-bottom:12px; }
+
+  /* Toggle */
+  .toggle-row { display:flex; align-items:center; justify-content:space-between; padding:6px 0; }
+  .toggle-row span { font-size:.85rem; }
+  .toggle { position:relative; width:40px; height:22px; cursor:pointer; }
+  .toggle input { opacity:0; width:0; height:0; }
+  .toggle .slider { position:absolute; inset:0; background:var(--border); border-radius:22px; transition:.2s; }
+  .toggle .slider::before { content:''; position:absolute; width:16px; height:16px; left:3px; top:3px; background:#fff; border-radius:50%; transition:.2s; }
+  .toggle input:checked + .slider { background:var(--primary); }
+  .toggle input:checked + .slider::before { transform:translateX(18px); }
+
+  /* Buttons */
+  .btn { padding:9px 20px; border:none; border-radius:6px; font-size:.88rem; cursor:pointer; font-weight:600; transition:.15s; display:inline-flex; align-items:center; gap:6px; }
+  .btn-primary { background:var(--primary); color:#fff; }
+  .btn-primary:hover { background:var(--primary-dim); }
+  .btn-secondary { background:var(--surface); color:var(--text); border:1px solid var(--border); }
+  .btn-secondary:hover { border-color:var(--primary); }
+  .btn-danger { background:var(--err); color:#fff; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .btn-row { display:flex; gap:8px; margin-top:16px; flex-wrap:wrap; }
+
+  /* Command preview */
+  .cmd-preview { background:#12121a; border:1px solid var(--border); border-radius:6px; padding:12px; font-family:'Fira Code',monospace; font-size:.82rem; color:var(--accent); word-break:break-all; margin-top:10px; position:relative; }
+  .cmd-preview .copy-btn { position:absolute; top:8px; right:8px; background:var(--surface); border:1px solid var(--border); color:var(--muted); padding:2px 8px; border-radius:4px; cursor:pointer; font-size:.75rem; }
+  .cmd-preview .copy-btn:hover { color:var(--text); border-color:var(--primary); }
+
+  /* Log */
+  .log-box { background:#0a0a10; border:1px solid var(--border); border-radius:6px; padding:12px; font-family:'Fira Code',monospace; font-size:.78rem; max-height:300px; overflow-y:auto; color:var(--muted); line-height:1.6; margin-top:12px; }
+  .log-box .line-ok { color:var(--success); }
+  .log-box .line-err { color:var(--err); }
+  .log-box .line-warn { color:var(--warn); }
+
+  /* Table */
+  table { width:100%; border-collapse:collapse; font-size:.85rem; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); }
+  th { color:var(--muted); font-weight:600; font-size:.78rem; text-transform:uppercase; letter-spacing:.5px; }
+  td { color:var(--text); }
+  tr:hover td { background:rgba(108,92,231,.05); }
+
+  /* Quality badges */
+  .badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:.75rem; font-weight:600; }
+  .badge-5 { background:#6c5ce720; color:#a29bfe; }
+  .badge-3 { background:#fdcb6e20; color:#fdcb6e; }
+  .badge-2 { background:#e1705520; color:#e17055; }
+
+  /* Sections hidden by default */
+  .section { display:none; }
+  .section.active { display:block; }
+
+  /* Responsive */
+  @media(max-width:768px) {
+    .sidebar { display:none; }
+    .main { padding:16px; }
+  }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>🎵 Qobuz-DL WebUI</h1>
+    <div class="status" id="connectionStatus"><div class="dot"></div><span>Connected</span></div>
+  </div>
+
+  <div class="layout">
+    <nav class="sidebar">
+      <a onclick="showSection('download')" class="active" id="nav-download"><span class="icon">⬇️</span> Download</a>
+      <a onclick="showSection('album')" id="nav-album"><span class="icon">💿</span> Album</a>
+      <a onclick="showSection('track')" id="nav-track"><span class="icon">🎵</span> Track</a>
+      <a onclick="showSection('playlist')" id="nav-playlist"><span class="icon">📃</span> Playlist</a>
+      <a onclick="showSection('search')" id="nav-search"><span class="icon">🔍</span> Search</a>
+      <a onclick="showSection('sync')" id="nav-sync"><span class="icon">🔄</span> Sync</a>
+      <a onclick="showSection('lucky')" id="nav-lucky"><span class="icon">🍀</span> Lucky</a>
+      <a onclick="showSection('lyrics')" id="nav-lyrics"><span class="icon">🎤</span> Lyrics</a>
+      <a onclick="showSection('config')" id="nav-config"><span class="icon">⚙️</span> Config</a>
+      <a onclick="showSection('qobuz')" id="nav-qobuz"><span class="icon">🔑</span> Qobuz App</a>
+      <a onclick="showSection('synedb')" id="nav-synedb"><span class="icon">💾</span> Sync-DB</a>
+      <a onclick="showSection('logs')" id="nav-logs"><span class="icon">📋</span> Logs</a>
+    </nav>
+
+    <main class="main">
+
+      <!-- ===== DOWNLOAD ===== -->
+      <div class="section active" id="sec-download">
+        <h2 style="margin-bottom:16px;">⬇️ Télécharger — URL</h2>
+        <p style="color:var(--muted);margin-bottom:16px;">Téléchargez un album, une piste ou une playlist depuis une URL Qobuz.</p>
+
+        <div class="card">
+          <h3>📥 qobuz-dl download &lt;URL&gt;</h3>
+          <p>Télécharge depuis une URL Qobuz. Supporte les albums, tracks et playlists.</p>
+
+          <div class="field">
+            <label>URL Qobuz</label>
+            <input type="text" id="dl_url" placeholder="https://open.qobuz.com/album/..." />
+          </div>
+
+          <div class="field">
+            <label>Qualité audio</label>
+            <select id="dl_quality">
+              <option value="">Défaut (config)</option>
+              <option value="5">Hi-Res (24bit/&gt;80kHz)</option>
+              <option value="4">Hi-Res (24bit/96kHz)</option>
+              <option value="3">CD (16bit/44.1kHz)</option>
+              <option value="2">High (16bit/44.1kHz)</option>
+              <option value="1">CAV (16bit/44.1kHz)</option>
+              <option value="0">SQR (16bit/44.1kHz)</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>Répertoire de sortie</label>
+            <input type="text" id="dl_dir" placeholder="Défaut: ./" />
+          </div>
+
+          <div class="field">
+            <label>Format de sortie</label>
+            <select id="dl_format">
+              <option value="">Défaut</option>
+              <option value="flac">FLAC</option>
+              <option value="wav">WAV</option>
+              <option value="ogg">OGG Vorbis</option>
+              <option value="mp3">MP3</option>
+              <option value="aac">AAC</option>
+              <option value="alac">ALAC</option>
+              <option value="opus">Opus</option>
+              <option value="aac_he">AAC HE</option>
+            </select>
+          </div>
+
+          <div class="toggle-row"><span>Mettre à jour les tags audio</span><label class="toggle"><input type="checkbox" id="dl_update_tags"><span class="slider"></span></label></div>
+          <div class="toggle-row"><span>Supprimer les fichiers temp.</span><label class="toggle"><input type="checkbox" id="dl_delete_temp" checked><span class="slider"></span></label></div>
+          <div class="toggle-row"><span>Afficher le nom du fichier avant de créer</span><label class="toggle"><input type="checkbox" id="dl_show_filename"><span class="slider"></span></label></div>
+
+          <div class="field" style="margin-top:10px">
+            <label>Optionnel : nom de fichier personnalisé pour un track unique</label>
+            <input type="text" id="dl_filename" placeholder="Ex: MaPiste.flac" />
+          </div>
+
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runDownload()">▶️ Lancer le téléchargement</button>
+            <button class="btn btn-secondary" onclick="previewCmd('download')">👁️ Prévisualiser la commande</button>
+          </div>
+          <div class="cmd-preview" id="preview-download" style="display:none"></div>
+        </div>
+
+        <div id="log-download" style="display:none">
+          <div class="log-box" id="logbox-download"></div>
+        </div>
+      </div>
+
+      <!-- ===== ALBUM ===== -->
+      <div class="section" id="sec-album">
+        <h2 style="margin-bottom:16px;">💿 Album</h2>
+
+        <div class="card">
+          <h3>📊 qobuz-dl album info &lt;ID&gt;</h3>
+          <p>Affiche les détails d'un album : titre, artiste, genres, qualité, label, date, tracklist.</p>
+          <div class="field">
+            <label>ID de l'album</label>
+            <input type="text" id="album_id" placeholder="Ex: 12345678" />
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runAlbumInfo()">📊 Voir les infos</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>🔊 qobuz-dl album bestquality &lt;ID&gt;</h3>
+          <p>Affiche la meilleure qualité disponible pour un album.</p>
+          <div class="field">
+            <label>ID de l'album</label>
+            <input type="text" id="album_bq_id" placeholder="Ex: 12345678" />
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runBestQuality()">🔊 Qualité max</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>⬇️ qobuz-dl album download &lt;ID&gt;</h3>
+          <p>Télécharge tout l'album par son ID.</p>
+          <div class="field">
+            <label>ID de l'album</label>
+            <input type="text" id="album_dl_id" placeholder="Ex: 12345678" />
+          </div>
+          <div class="field">
+            <label>Qualité audio</label>
+            <select id="album_dl_quality">
+              <option value="">Défaut</option>
+              <option value="5">Hi-Res (24bit/&gt;80kHz)</option>
+              <option value="4">Hi-Res (24bit/96kHz)</option>
+              <option value="3">CD (16bit/44.1kHz)</option>
+              <option value="2">High</option>
+              <option value="1">CAV</option>
+              <option value="0">SQR</option>
+            </select>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runAlbumDownload()">⬇️ Télécharger l'album</button>
+          </div>
+        </div>
+
+        <div id="log-album" style="display:none">
+          <div class="log-box" id="logbox-album"></div>
+        </div>
+      </div>
+
+      <!-- ===== TRACK ===== -->
+      <div class="section" id="sec-track">
+        <h2 style="margin-bottom:16px;">🎵 Track</h2>
+
+        <div class="card">
+          <h3>📊 qobuz-dl track info &lt;ID&gt;</h3>
+          <p>Affiche les détails d'une piste : titre, artiste, album, durée, qualité, UPC, ISRC.</p>
+          <div class="field">
+            <label>ID de la piste</label>
+            <input type="text" id="track_id" placeholder="Ex: 12345678" />
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runTrackInfo()">📊 Voir les infos</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>⬇️ qobuz-dl track download &lt;ID&gt;</h3>
+          <p>Télécharge une piste par son ID.</p>
+          <div class="field">
+            <label>ID de la piste</label>
+            <input type="text" id="track_dl_id" placeholder="Ex: 12345678" />
+          </div>
+          <div class="field">
+            <label>Qualité audio</label>
+            <select id="track_dl_quality">
+              <option value="">Défaut</option>
+              <option value="5">Hi-Res (24bit/&gt;80kHz)</option>
+              <option value="4">Hi-Res (24bit/96kHz)</option>
+              <option value="3">CD (16bit/44.1kHz)</option>
+              <option value="2">High</option>
+              <option value="1">CAV</option>
+              <option value="0">SQR</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Nom de fichier (optionnel)</label>
+            <input type="text" id="track_dl_filename" placeholder="Ex: MaPiste.flac" />
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runTrackDownload()">⬇️ Télécharger le track</button>
+          </div>
+        </div>
+
+        <div id="log-track" style="display:none">
+          <div class="log-box" id="logbox-track"></div>
+        </div>
+      </div>
+
+      <!-- ===== PLAYLIST ===== -->
+      <div class="section" id="sec-playlist">
+        <h2 style="margin-bottom:16px;">📃 Playlist</h2>
+
+        <div class="card">
+          <h3>📊 qobuz-dl playlist info &lt;URL&gt;</h3>
+          <p>Affiche les infos et la liste des pistes d'une playlist Qobuz.</p>
+          <div class="field">
+            <label>URL de la playlist</label>
+            <input type="text" id="pl_url" placeholder="https://open.qobuz.com/playlist/..." />
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runPlaylistInfo()">📊 Voir la playlist</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>⬇️ qobuz-dl playlist download &lt;URL&gt;</h3>
+          <p>Télécharge toute la playlist. <strong>Attention :</strong> le contenu d'une playlist peut changer après son téléchargement (ajout/retrait de pistes).</p>
+          <div class="field">
+            <label>URL de la playlist</label>
+            <input type="text" id="pl_dl_url" placeholder="https://open.qobuz.com/playlist/..." />
+          </div>
+          <div class="field">
+            <label>Qualité audio</label>
+            <select id="pl_dl_quality">
+              <option value="">Défaut</option>
+              <option value="5">Hi-Res</option>
+              <option value="4">Hi-Res (96kHz)</option>
+              <option value="3">CD</option>
+              <option value="2">High</option>
+            </select>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runPlaylistDownload()">⬇️ Télécharger la playlist</button>
+          </div>
+        </div>
+
+        <div id="log-playlist" style="display:none">
+          <div class="log-box" id="logbox-playlist"></div>
+        </div>
+      </div>
+
+      <!-- ===== SEARCH ===== -->
+      <div class="section" id="sec-search">
+        <h2 style="margin-bottom:16px;">🔍 Recherche</h2>
+
+        <div class="card">
+          <h3>🔎 qobuz-dl search --keyword &lt;TEXT&gt;</h3>
+          <p>Recherche sur Qobuz (albums, artistes, titres).</p>
+          <div class="field">
+            <label>Mot-clé de recherche</label>
+            <input type="text" id="search_keyword" placeholder="Ex: Radiohead OK Computer" />
+          </div>
+          <div class="field">
+            <label>Limite de résultats</label>
+            <input type="number" id="search_limit" value="10" min="1" max="100" />
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runSearch()">🔎 Rechercher</button>
+          </div>
+        </div>
+
+        <div id="log-search" style="display:none">
+          <div class="log-box" id="logbox-search"></div>
+        </div>
+      </div>
+
+      <!-- ===== CONFIG ===== -->
+      <div class="section" id="sec-config">
+        <h2 style="margin-bottom:16px;">⚙️ Configuration</h2>
+
+        <div class="card">
+          <h3>📄 qobuz-dl config show</h3>
+          <p>Affiche le contenu actuel du fichier de configuration.</p>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runConfigShow()">📄 Voir la config</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>⬇️ qobuz-dl config download</h3>
+          <p>Télécharge le fichier de configuration depuis Qobuz.</p>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runConfigDownload()">⬇️ Télécharger la config</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>✏️ qobuz-dl config edit</h3>
+          <p>Ouvre le fichier de configuration dans l'éditeur par défaut.</p>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runConfigEdit()">✏️ Editer la config</button>
+          </div>
+        </div>
+
+        <div id="log-config" style="display:none">
+          <div class="log-box" id="logbox-config"></div>
+        </div>
+      </div>
+
+      <!-- ===== QOBUZ APP ===== -->
+      <div class="section" id="sec-qobuz">
+        <h2 style="margin-bottom:16px;">🔑 Qobuz App Credentials</h2>
+
+        <div class="card">
+          <h3>🔗 qobuz-dl qobuzapp</h3>
+          <p>Extrait automatiquement les credentials de l'app Qobuz (user token, user ID, device ID, session token).</p>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runQobuzApp()">🔗 Extraire les credentials</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>👤 qobuz-dl qobuzapp user</h3>
+          <p>Affiche les informations de l'utilisateur.</p>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runQobuzAppUser()">👤 Infos utilisateur</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>🔄 qobuz-dl qobuzapp refresh</h3>
+          <p>Refresh les credentials (user token, user ID, device ID, session token).</p>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runQobuzAppRefresh()">🔄 Refresh credentials</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>🗑️ qobuz-dl qobuzapp clear</h3>
+          <p>Efface les user token, user ID, device ID, session token.</p>
+          <div class="btn-row">
+            <button class="btn btn-danger" onclick="runQobuzAppClear()">🗑️ Clear credentials</button>
+          </div>
+        </div>
+
+        <div id="log-qobuz" style="display:none">
+          <div class="log-box" id="logbox-qobuz"></div>
+        </div>
+      </div>
+
+      <!-- ===== SYNC ===== -->
+      <div class="section" id="sec-sync">
+        <h2 style="margin-bottom:16px;">🔄 Synchronisation</h2>
+
+        <div class="card">
+          <h3>👤 qobuz-dl sync-artist &lt;URL&gt;</h3>
+          <p>Sync la discographie complète d'un artiste. Télécharge tous les albums, EP, singles. Utilise les options de qualité/filtres.</p>
+          <div class="field">
+            <label>URL de l'artiste Qobuz</label>
+            <input type="text" id="sync_artist_url" placeholder="https://open.qobuz.com/artist/..." />
+          </div>
+          <div class="field">
+            <label>Qualité audio</label>
+            <select id="sync_artist_quality">
+              <option value="">Défaut (config)</option>
+              <option value="5">Hi-Res (24bit/>80kHz)</option>
+              <option value="4">Hi-Res (24bit/96kHz)</option>
+              <option value="3">CD (16bit/44.1kHz)</option>
+              <option value="2">High (16bit/44.1kHz)</option>
+            </select>
+          </div>
+          <div class="toggle-row"><span>Uniquement les albums (skip singles/EP)</span><label class="toggle"><input type="checkbox" id="sync_artist_albums_only"><span class="slider"></span></label></div>
+          <div class="toggle-row"><span>Filtrage intelligent (smart)</span><label class="toggle"><input type="checkbox" id="sync_artist_smart"><span class="slider"></span></label></div>
+          <div class="toggle-row"><span>Mode dry-run (prévisualisation)</span><label class="toggle"><input type="checkbox" id="sync_artist_dryrun"><span class="slider"></span></label></div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runSyncArtist()">🔄 Sync Artiste</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>📃 qobuz-dl sync-playlist &lt;URL&gt;</h3>
+          <p>Sync une playlist Qobuz. Compare le contenu avec le dossier local et télécharge uniquement les nouvelles pistes.</p>
+          <div class="field">
+            <label>URL de la playlist Qobuz</label>
+            <input type="text" id="sync_playlist_url" placeholder="https://open.qobuz.com/playlist/..." />
+          </div>
+          <div class="field">
+            <label>Répertoire local (optionnel)</label>
+            <input type="text" id="sync_playlist_dir" placeholder="Défaut: ./playlists/" />
+          </div>
+          <div class="field">
+            <label>Qualité audio</label>
+            <select id="sync_playlist_quality">
+              <option value="">Défaut</option>
+              <option value="5">Hi-Res</option>
+              <option value="4">Hi-Res (96kHz)</option>
+              <option value="3">CD</option>
+              <option value="2">High</option>
+            </select>
+          </div>
+          <div class="toggle-row"><span>Auto-confirmer les suppressions</span><label class="toggle"><input type="checkbox" id="sync_playlist_auto_confirm"><span class="slider"></span></label></div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runSyncPlaylist()">🔄 Sync Playlist</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>💿 qobuz-dl sync-album &lt;URL&gt;</h3>
+          <p>Sync un album avec le dossier local. Compare et met à jour uniquement les fichiers manquants ou modifiés.</p>
+          <div class="field">
+            <label>URL de l'album Qobuz</label>
+            <input type="text" id="sync_album_url" placeholder="https://open.qobuz.com/album/..." />
+          </div>
+          <div class="field">
+            <label>Qualité audio</label>
+            <select id="sync_album_quality">
+              <option value="">Défaut</option>
+              <option value="5">Hi-Res</option>
+              <option value="4">Hi-Res (96kHz)</option>
+              <option value="3">CD</option>
+              <option value="2">High</option>
+            </select>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runSyncAlbum()">🔄 Sync Album</button>
+          </div>
+        </div>
+
+        <div id="log-sync" style="display:none">
+          <div class="log-box" id="logbox-sync"></div>
+        </div>
+      </div>
+
+      <!-- ===== LUCKY ===== -->
+      <div class="section" id="sec-lucky">
+        <h2 style="margin-bottom:16px;">🍀 Lucky Search & Download</h2>
+
+        <div class="card">
+          <h3>🍀 qobuz-dl lucky &lt;QUERY&gt;</h3>
+          <p>Recherche et télécharge le meilleur résultat correspondant. Alternative pratique pour obtenir rapidement un album/track.</p>
+          <div class="field">
+            <label>Recherche (artiste, album, track)</label>
+            <input type="text" id="lucky_query" placeholder="Ex: Radiohead OK Computer" />
+          </div>
+          <div class="field">
+            <label>Type de résultat</label>
+            <select id="lucky_type">
+              <option value="">Auto-detect</option>
+              <option value="artist">Artiste</option>
+              <option value="album">Album</option>
+              <option value="track">Track</option>
+              <option value="playlist">Playlist</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Nombre de résultats</label>
+            <input type="number" id="lucky_number" value="1" min="1" max="20" />
+          </div>
+          <div class="field">
+            <label>Qualité audio</label>
+            <select id="lucky_quality">
+              <option value="">Défaut</option>
+              <option value="5">Hi-Res</option>
+              <option value="4">Hi-Res (96kHz)</option>
+              <option value="3">CD</option>
+              <option value="2">High</option>
+            </select>
+          </div>
+          <div class="toggle-row"><span>Mode dry-run (prévisualisation)</span><label class="toggle"><input type="checkbox" id="lucky_dryrun"><span class="slider"></span></label></div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runLucky()">🍀 Lucky Download</button>
+          </div>
+        </div>
+
+        <div id="log-lucky" style="display:none">
+          <div class="log-box" id="logbox-lucky"></div>
+        </div>
+      </div>
+
+      <!-- ===== LYRICS ===== -->
+      <div class="section" id="sec-lyrics">
+        <h2 style="margin-bottom:16px;">🎤 Lyrics</h2>
+
+        <div class="card">
+          <h3>🎤 qobuz-dl lyrics &lt;DIRECTORY&gt;</h3>
+          <p>Sync les paroles (lyrics) pour les fichiers audio dans un répertoire. Ajoute les paroles aux tags des fichiers existants.</p>
+          <div class="field">
+            <label>Répertoire contenant les fichiers audio</label>
+            <input type="text" id="lyrics_dir" placeholder="/chemin/vers/musique/" />
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runLyrics()">🎤 Sync Lyrics</button>
+          </div>
+        </div>
+
+        <div id="log-lyrics" style="display:none">
+          <div class="log-box" id="logbox-lyrics"></div>
+        </div>
+      </div>
+
+      <!-- ===== SYNC-DB ===== -->
+      <div class="section" id="sec-synedb">
+        <h2 style="margin-bottom:16px;">💾 Sync Database</h2>
+
+        <div class="card">
+          <h3>💾 qobuz-dl sync-db</h3>
+          <p>Sync la base de données de synchronisation. Met à jour les métadonnées locales avec les données Qobuz.</p>
+          <div class="field">
+            <label>Chemin vers le fichier de config (optionnel)</label>
+            <input type="text" id="synedb_path" placeholder="Défaut: config par défaut" />
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runSyncDb()">💾 Sync Database</button>
+          </div>
+        </div>
+
+        <div id="log-synedb" style="display:none">
+          <div class="log-box" id="logbox-synedb"></div>
+        </div>
+      </div>
+
+      <!-- ===== LOGS ===== -->
+      <div class="section" id="sec-logs">
+        <h2 style="margin-bottom:16px;">📋 Logs en temps réel</h2>
+
+        <div class="card">
+          <h3>Journal d'exécution</h3>
+          <p>Logs de toutes les commandes exécutées.</p>
+          <div class="btn-row">
+            <button class="btn btn-secondary" onclick="clearLogs()">🗑️ Effacer</button>
+          </div>
+          <div class="log-box" id="logbox-main" style="max-height:500px;margin-top:12px;"></div>
+        </div>
+
+        <div class="card">
+          <h3>🧪 qobuz-dl --version</h3>
+          <p>Vérifie la version installée.</p>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runVersion()">📌 Version</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>📖 qobuz-dl --help</h3>
+          <p>Affiche l'aide complète.</p>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="runHelp()">📖 Aide complète</button>
+          </div>
+        </div>
+
+        <div id="log-logs" style="display:none">
+          <div class="log-box" id="logbox-logs"></div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+<script>
+  const API = '';
+
+  // Navigate sections
+  function showSection(name) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.sidebar a').forEach(a => a.classList.remove('active'));
+    document.getElementById('sec-' + name).classList.add('active');
+    document.getElementById('nav-' + name).classList.add('active');
+  }
+
+  // Add log line
+  function addLog(text, cls='') {
+    const box = document.getElementById('logbox-main');
+    const line = document.createElement('div');
+    if(cls) line.className = 'line-' + cls;
+    line.textContent = text;
+    box.appendChild(line);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function clearLogs() { document.getElementById('logbox-main').innerHTML = ''; }
+
+  // Build command string for download
+  function buildDownloadCmd() {
+    let cmd = 'qobuz-dl download ' + (document.getElementById('dl_url').value || '<URL>');
+    if(document.getElementById('dl_quality').value) cmd += ' --quality ' + document.getElementById('dl_quality').value;
+    if(document.getElementById('dl_dir').value) cmd += ' --output-dir ' + document.getElementById('dl_dir').value;
+    if(document.getElementById('dl_format').value) cmd += ' --format ' + document.getElementById('dl_format').value;
+    if(document.getElementById('dl_update_tags').checked) cmd += ' --update-tags';
+    if(document.getElementById('dl_delete_temp').checked) cmd += ' --delete-temp-files';
+    if(document.getElementById('dl_show_filename').checked) cmd += ' --show-filename-before-create';
+    if(document.getElementById('dl_filename').value) cmd += ' --filename "' + document.getElementById('dl_filename').value + '"';
+    return cmd;
+  }
+
+  function previewCmd(section) {
+    const el = document.getElementById('preview-' + section);
+    el.style.display = 'block';
+    let cmd = '';
+    if(section === 'download') cmd = buildDownloadCmd();
+    el.innerHTML = cmd + '<button class="copy-btn" onclick="navigator.clipboard.writeText(\'' + cmd.replace(/\\/g,'\\\\').replace(/'/g,"\\'") + '\');this.textContent=\'Copié!\'">📋 Copier</button>';
+  }
+
+  // Run command via API
+  async function runCommand(cmd, logId) {
+    const logBox = document.getElementById('logbox-' + (logId || 'main'));
+    const logDiv = document.getElementById('log-' + (logId || 'logs'));
+    logDiv.style.display = 'block';
+    logBox.innerHTML = '<div>▶ ' + cmd.replace(/</g,'&lt;') + '</div><br>';
+
+    try {
+      const resp = await fetch(API + '/api/run', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({command: cmd})
+      });
+
+      if(!resp.ok) {
+        const err = await resp.json();
+        logBox.innerHTML += '<div class="line-err">Erreur: ' + (err.detail || err.message) + '</div>';
+        return;
+      }
+
+      // SSE streaming
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while(true) {
+        const {done, value} = await reader.read();
+        if(done) break;
+        buffer += decoder.decode(value, {stream: true});
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for(const line of lines) {
+          if(line.startsWith('data: ')) {
+            const data = line.slice(6);
+            try {
+              const j = JSON.parse(data);
+              const cls = j.type === 'error' ? 'line-err' : j.type === 'warn' ? 'line-warn' : j.type === 'ok' ? 'line-ok' : '';
+              logBox.innerHTML += '<div class="' + cls + '">' + escapeHtml(j.text) + '</div>';
+              logBox.scrollTop = logBox.scrollHeight;
+            } catch(e) {
+              logBox.innerHTML += '<div>' + escapeHtml(data) + '</div>';
+            }
+          }
+        }
+      }
+      logBox.innerHTML += '<div class="line-ok">✓ Terminé</div>';
+    } catch(e) {
+      logBox.innerHTML += '<div class="line-err">Erreur: ' + e.message + '</div>';
+    }
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // ===== Action functions =====
+  function runDownload() {
+    const url = document.getElementById('dl_url').value;
+    if(!url) { alert('Veuillez entrer une URL Qobuz'); return; }
+    let cmd = 'qobuz-dl download ' + url;
+    const q = document.getElementById('dl_quality').value;
+    const d = document.getElementById('dl_dir').value;
+    const f = document.getElementById('dl_format').value;
+    if(q) cmd += ' --quality ' + q;
+    if(d) cmd += ' --output-dir ' + d;
+    if(f) cmd += ' --format ' + f;
+    if(document.getElementById('dl_update_tags').checked) cmd += ' --update-tags';
+    if(document.getElementById('dl_delete_temp').checked) cmd += ' --delete-temp-files';
+    if(document.getElementById('dl_show_filename').checked) cmd += ' --show-filename-before-create';
+    const fn = document.getElementById('dl_filename').value;
+    if(fn) cmd += ' --filename "' + fn + '"';
+    runCommand(cmd, 'download');
+  }
+
+  function runAlbumInfo() {
+    const id = document.getElementById('album_id').value;
+    if(!id) return;
+    runCommand('qobuz-dl album info ' + id, 'album');
+  }
+
+  function runBestQuality() {
+    const id = document.getElementById('album_bq_id').value;
+    if(!id) return;
+    runCommand('qobuz-dl album bestquality ' + id, 'album');
+  }
+
+  function runAlbumDownload() {
+    const id = document.getElementById('album_dl_id').value;
+    if(!id) return;
+    let cmd = 'qobuz-dl album download ' + id;
+    const q = document.getElementById('album_dl_quality').value;
+    if(q) cmd += ' --quality ' + q;
+    runCommand(cmd, 'album');
+  }
+
+  function runTrackInfo() {
+    const id = document.getElementById('track_id').value;
+    if(!id) return;
+    runCommand('qobuz-dl track info ' + id, 'track');
+  }
+
+  function runTrackDownload() {
+    const id = document.getElementById('track_dl_id').value;
+    if(!id) return;
+    let cmd = 'qobuz-dl track download ' + id;
+    const q = document.getElementById('track_dl_quality').value;
+    if(q) cmd += ' --quality ' + q;
+    const fn = document.getElementById('track_dl_filename').value;
+    if(fn) cmd += ' --filename "' + fn + '"';
+    runCommand(cmd, 'track');
+  }
+
+  function runPlaylistInfo() {
+    const url = document.getElementById('pl_url').value;
+    if(!url) return;
+    runCommand('qobuz-dl playlist info ' + url, 'playlist');
+  }
+
+  function runPlaylistDownload() {
+    const url = document.getElementById('pl_dl_url').value;
+    if(!url) return;
+    let cmd = 'qobuz-dl playlist download ' + url;
+    const q = document.getElementById('pl_dl_quality').value;
+    if(q) cmd += ' --quality ' + q;
+    runCommand(cmd, 'playlist');
+  }
+
+  function runSearch() {
+    const kw = document.getElementById('search_keyword').value;
+    if(!kw) return;
+    const lim = document.getElementById('search_limit').value || '10';
+    runCommand('qobuz-dl search --keyword "' + kw + '" --limit ' + lim, 'search');
+  }
+
+  function runConfigShow() { runCommand('qobuz-dl config show', 'config'); }
+  function runConfigDownload() { runCommand('qobuz-dl config download', 'config'); }
+  function runConfigEdit() { runCommand('qobuz-dl config edit', 'config'); }
+  function runQobuzApp() { runCommand('qobuz-dl qobuzapp', 'qobuz'); }
+  function runQobuzAppUser() { runCommand('qobuz-dl qobuzapp user', 'qobuz'); }
+  function runQobuzAppRefresh() { runCommand('qobuz-dl qobuzapp refresh', 'qobuz'); }
+  function runQobuzAppClear() { runCommand('qobuz-dl qobuzapp clear', 'qobuz'); }
+  // ===== SYNC functions =====
+  function runSyncArtist() {
+    const url = document.getElementById('sync_artist_url').value;
+    if(!url) { alert('Veuillez entrer une URL d\'artiste'); return; }
+    let cmd = 'qobuz-dl sync-artist ' + url;
+    const q = document.getElementById('sync_artist_quality').value;
+    if(q) cmd += ' --quality ' + q;
+    if(document.getElementById('sync_artist_albums_only').checked) cmd += ' --albums-only';
+    if(document.getElementById('sync_artist_smart').checked) cmd += ' -s';
+    if(document.getElementById('sync_artist_dryrun').checked) cmd += ' --dry-run';
+    runCommand(cmd, 'sync');
+  }
+
+  function runSyncPlaylist() {
+    const url = document.getElementById('sync_playlist_url').value;
+    if(!url) { alert('Veuillez entrer une URL de playlist'); return; }
+    let cmd = 'qobuz-dl sync-playlist ' + url;
+    const dir = document.getElementById('sync_playlist_dir').value;
+    if(dir) cmd += ' --output-dir "' + dir + '"';
+    const q = document.getElementById('sync_playlist_quality').value;
+    if(q) cmd += ' --quality ' + q;
+    if(document.getElementById('sync_playlist_auto_confirm').checked) cmd += ' --auto-confirm';
+    runCommand(cmd, 'sync');
+  }
+
+  function runSyncAlbum() {
+    const url = document.getElementById('sync_album_url').value;
+    if(!url) { alert('Veuillez entrer une URL d\'album'); return; }
+    let cmd = 'qobuz-dl sync-album ' + url;
+    const q = document.getElementById('sync_album_quality').value;
+    if(q) cmd += ' --quality ' + q;
+    runCommand(cmd, 'sync');
+  }
+
+  // ===== LUCKY functions =====
+  function runLucky() {
+    const query = document.getElementById('lucky_query').value;
+    if(!query) { alert('Veuillez entrer une recherche'); return; }
+    let cmd = 'qobuz-dl lucky "' + query + '"';
+    const type = document.getElementById('lucky_type').value;
+    if(type) cmd += ' --type ' + type;
+    const num = document.getElementById('lucky_number').value;
+    if(num && num !== '1') cmd += ' --number ' + num;
+    const q = document.getElementById('lucky_quality').value;
+    if(q) cmd += ' --quality ' + q;
+    if(document.getElementById('lucky_dryrun').checked) cmd += ' --dry-run';
+    runCommand(cmd, 'lucky');
+  }
+
+  // ===== LYRICS functions =====
+  function runLyrics() {
+    const dir = document.getElementById('lyrics_dir').value;
+    if(!dir) { alert('Veuillez entrer un répertoire'); return; }
+    runCommand('qobuz-dl lyrics "' + dir + '"', 'lyrics');
+  }
+
+  // ===== SYNC-DB functions =====
+  function runSyncDb() {
+    let cmd = 'qobuz-dl sync-db';
+    const path = document.getElementById('synedb_path').value;
+    if(path) cmd += ' --config "' + path + '"';
+    runCommand(cmd, 'synedb');
+  }
+
+  function runVersion() { runCommand('qobuz-dl --version', 'logs'); }
+  function runHelp() { runCommand('qobuz-dl --help', 'logs'); }
+
+  // Connection check
+  fetch(API + '/api/health')
+    .then(r => r.json())
+    .then(d => {
+      document.getElementById('connectionStatus').innerHTML = '<div class="dot"></div><span>qobuz-dl ' + (d.version || 'OK') + '</span>';
+    })
+    .catch(() => {
+      document.getElementById('connectionStatus').innerHTML = '<div class="dot" style="background:var(--warn)"></div><span>Server non disponible</span>';
+    });
+</script>
+</body>
+</html>

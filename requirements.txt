@@ -1,8 +1,3 @@
-pathvalidate
-requests
-mutagen
-tqdm
-pick==1.6.0
-beautifulsoup4
-colorama
-cryptography
+fastapi>=0.115
+uvicorn[standard]>=0.34
+pydantic>=2
