@@ -383,10 +383,14 @@ class Download:
         if aborted_by_user:
             os._exit(1)
             
+        # --- DATABASE UPGRADE: Inject artist and album metadata ---
+        db_artist = album_attr.get("album_artist", "Unknown")
+        db_album = album_attr.get("album_title", "Unknown")
+        
         handle_download_id(db_path=self.download_db, item_id=self.item_id, add_id=True, media_type="album",
                            quality=self.quality, file_format=file_format, quality_met=quality_met,
                            bit_depth=bit_depth, sampling_rate=sampling_rate, saved_path=final_dirn,
-                           url=url, release_date=release_date)
+                           url=url, release_date=release_date, artist=db_artist, album=db_album)
         safe_print(f"{GREEN}Completed{OFF}")
 
     def download_track(self):
@@ -458,10 +462,14 @@ class Download:
             
             _clean_embed_art(dirn, self.settings)
             
+            # --- DATABASE UPGRADE: Inject artist and album metadata ---
+            db_artist = track_attr.get("artist", "Unknown")
+            db_album = track_attr.get("album", "Unknown")
+            
             handle_download_id(db_path=self.download_db, item_id=self.item_id, add_id=True, media_type="track",
                                quality=self.quality, file_format=file_format, quality_met=quality_met,
                                bit_depth=bit_depth, sampling_rate=sampling_rate, saved_path=dirn,
-                               url=url, release_date=release_date)
+                               url=url, release_date=release_date, artist=db_artist, album=db_album)
         else:
             logger.info(f"{OFF}Demo. Skipping")
         logger.info(f"{GREEN}Completed{OFF}")
