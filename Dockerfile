@@ -7,8 +7,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install qobuz-dl from our fork
-RUN pip install --no-cache-dir git+https://github.com/chwps/qobuz-dl.git
+# Install qobuz-dl from upstream
+RUN pip install --no-cache-dir git+https://github.com/Sei969/qobuz-dl.git
 
 # WebUI deps
 COPY requirements.txt .
