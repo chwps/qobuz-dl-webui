@@ -11,7 +11,7 @@ import signal
 import requests
 
 from qobuz_dl.bundle import Bundle
-from qobuz_dl.color import GREEN, RED, YELLOW, OFF
+from qobuz_dl.color import GREEN, RED, YELLOW, OFF, CYAN
 from qobuz_dl.commands import qobuz_dl_args
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.downloader import DEFAULT_FOLDER, DEFAULT_TRACK
@@ -283,6 +283,24 @@ def main():
             print("\n\n\033[91m[!] Radar manually interrupted by the user (CTRL+C).\033[0m")
         sys.exit(0)
     # --------------------------------------------
+
+    # --- NEW: STATS COMMAND INTEGRATION ---
+    if len(sys.argv) > 1 and sys.argv[1] == "stats":
+        from qobuz_dl.db import get_stats
+        
+        # QOBUZ_DB è già definito all'inizio di cli.py, lo usiamo direttamente
+        artists = get_stats(QOBUZ_DB)
+        
+        print(f"\n{CYAN}--- QOBUZ-DL ULTIMATE STATISTICS ---{OFF}")
+        if not artists:
+            print(f"{YELLOW}No artist data found yet. Start downloading to populate your stats!{OFF}")
+        else:
+            print(f"Total Unique Artists Downloaded: {len(artists)}\n")
+            for artist in artists:
+                print(f" - {artist}")
+        print(f"{CYAN}-------------------------------------{OFF}\n")
+        sys.exit(0) # Esce immediatamente dopo aver stampato le statistiche
+    # -------------------------------------------------
 
     config = configparser.ConfigParser(interpolation=None)
     config.read(CONFIG_FILE)
