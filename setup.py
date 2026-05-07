@@ -1,7 +1,19 @@
+import os
 from setuptools import setup, find_packages
 
 # 1. NEW PACKAGE NAME (Must be unique on PyPI)
 pkg_name = "qobuz-dl-ultimate"
+
+def get_version():
+    init_path = os.path.join(os.path.dirname(__file__), "qobuz_dl", "__init__.py")
+    try:
+        with open(init_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("__version__"):
+                    return line.split('"')[1]
+    except Exception:
+        pass
+    return "2.1.4"
 
 def read_file(fname):
     # Added encoding="utf-8" to prevent build errors with emojis in README
@@ -22,8 +34,8 @@ requirements = [
 
 setup(
     name=pkg_name,
-    # 2. VERSION RESET FOR YOUR RELEASE
-    version="2.1.4",  
+    # 2. VERSION READ AUTOMATICALLY FROM __init__.py
+    version=get_version(),  
     # 3. AUTHOR INFO
     author="Riccardo (Sei969)",
     author_email="Sei969@users.noreply.github.com",

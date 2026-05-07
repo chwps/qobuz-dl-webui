@@ -8,6 +8,7 @@ import os
 import getpass
 import hashlib
 import signal
+import requests
 
 from qobuz_dl.bundle import Bundle
 from qobuz_dl.color import GREEN, RED, YELLOW, OFF
@@ -244,9 +245,32 @@ def _initial_checks():
     if len(sys.argv) < 2:
         sys.exit(qobuz_dl_args().print_help())
 
+def check_for_updates():
+    try:
+        from qobuz_dl import __version__
+        
+        url = "https://api.github.com/repos/Sei969/qobuz-dl/releases/latest"
+        response = requests.get(url, timeout=2)
+        response.raise_for_status()
+        
+        latest_version_str = response.json().get("tag_name", "").replace("v", "")
+        current_version_str = __version__
+        
+        latest_tuple = tuple(map(int, latest_version_str.split(".")))
+        current_tuple = tuple(map(int, current_version_str.split(".")))
+        
+        if latest_tuple > current_tuple:
+            print(f"\n{YELLOW}[*] UPDATE AVAILABLE: Ultimate Edition v{latest_version_str} is out!{OFF}")
+            print(f"{YELLOW}    - PyPI: run 'pip install -U qobuz-dl-ultimate'{OFF}")
+            print(f"{YELLOW}    - Docker: pull the latest image{OFF}")
+            print(f"{YELLOW}    - Standalone: download the new release from GitHub{OFF}\n")
+            
+    except Exception:
+        pass
 
 def main():
     _initial_checks()
+    check_for_updates()
 
     # --- RADAR FEATURE (Standalone Intercept) ---
     import sys
