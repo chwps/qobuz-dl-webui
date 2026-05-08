@@ -81,23 +81,39 @@ async def run_command_stream(command: str):
         yield f"data: {json.dumps({'type': 'error', 'text': f'Binaire non trouvé: {QOBUZ_DL_BIN}'})}\n\n"
         return
 
-    async def read_stream(stream, tag):
+    # Queues for collecting lines from stdout/stderr
+    q_out = asyncio.Queue()
+    q_err = asyncio.Queue()
+
+    async def push_lines(stream, queue):
+        """Read lines from stream and push them to queue (true coroutine, no yield)."""
         while True:
             line = await stream.readline()
             if not line:
                 break
             text = line.decode(errors="replace").rstrip("\n\r")
             typ = classify_line(text)
-            yield f"data: {json.dumps({'type': typ, 'text': text, 'tag': tag})}\n\n"
+            await queue.put(json.dumps({"type": typ, "text": text}))
+        await queue.put(None)  # sentinel
 
-    # Read stdout and stderr concurrently
-    stdout_task = asyncio.create_task(read_stream(proc.stdout, "stdout"))
-    stderr_task = asyncio.create_task(read_stream(proc.stderr, "stderr"))
+    # Spawn reader coroutines
+    asyncio.create_task(push_lines(proc.stdout, q_out))
+    asyncio.create_task(push_lines(proc.stderr, q_err))
 
-    # Wait for both
-    await asyncio.gather(stdout_task, stderr_task)
+    # Drain queues and yield SSE events
+    done_count = 0
+    while done_count < 2:
+        # Pick whichever queue has data
+        tasks = [q_out.get(), q_err.get()]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for i, result in enumerate(results):
+            if result is None:
+                done_count += 1
+                continue
+            yield f"data: {json.dumps({'type': 'info', 'text': result})}\n\n"
+
     await proc.wait()
-
     yield f"data: {json.dumps({'type': 'ok', 'text': f'Exit code: {proc.returncode}'})}\n\n"
 
 
