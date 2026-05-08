@@ -64,6 +64,7 @@ Qobuz-DL Ultimate allows deep customization of your library structure using vari
 Seamlessly bridge your mobile listening habits with your local offline library. Instead of manually copying URLs, launch the Interactive Mode (`fun`) to securely access your personal Qobuz account and browse your **Favorite Albums, Tracks, Artists, and Playlists** directly from the terminal.
 * **Zero-Typing Workflow:** Fetch your private library with a single click without ever leaving the terminal.
 * **Massive Batch Downloading:** Use the `Spacebar` to multi-select dozens of your favorite releases from the clean, minimalist UI and queue them all up for download in seconds.
+* **Smart Release Filter (Heuristic Engine):** When fetching an artist's discography, the engine runs a blazing-fast local heuristic algorithm to categorize releases (Albums, EPs, Singles, Live). It instantly presents a multi-select checkbox UI, allowing you to filter out unwanted singles or compilations before the download even begins, saving massive amounts of time and storage.
 
 ### 🌉 Last.fm Smart Integration & Interactive Mode
 Seamlessly bridge your Last.fm world with Qobuz. Download your personalized playlists and "Loved Tracks" with ease. 
@@ -160,7 +161,7 @@ Since Qobuz blocked direct password logins for third-party applications, you nee
 
 ```text
 [Global Commands & Database Management]
-usage: python -m qobuz_dl [-h] [-r] [-p] [--sync-db [PATH]] [-sc] {interactive,i,fun,dl,lucky,lyrics,radar,sync-playlist,sp} ...
+usage: python -m qobuz_dl [-h] [-r] [-p] [--sync-db [PATH]] [-sc] {interactive,i,fun,dl,lucky,lyrics,radar,sync-playlist,sp,stats} ...
 
 [Download Usage]
 usage: python -m qobuz_dl dl [-h] [-d PATH] [-q int] [--albums-only] [--no-m3u] [--no-fallback] [--no-db] 
@@ -268,6 +269,12 @@ The Ultimate Edition includes powerful local library managers to keep track of y
   ```bash
   python -m qobuz_dl --purge
   ```
+
+* **User Statistics (`stats`):**
+  Curious about your downloading habits? This command instantly queries your local SQLite database to display your download statistics, including the total number of unique artists fetched and a complete alphabetical list of your library.
+  ```bash
+  python -m qobuz_dl stats
+```
 
 ### 🛠️ Key Formatting Variables
 
