@@ -8,7 +8,7 @@ from pathvalidate import sanitize_filename
 
 from qobuz_dl.bundle import Bundle
 from qobuz_dl import downloader, qopy
-from qobuz_dl.color import CYAN, OFF, RED, YELLOW, DF, RESET
+from qobuz_dl.color import CYAN, OFF, RED, YELLOW, DF, RESET, GREEN
 from qobuz_dl.exceptions import NonStreamable
 from qobuz_dl.db import create_db, handle_download_id
 from qobuz_dl.utils import (
@@ -201,6 +201,74 @@ class QobuzDL:
                 for chunk in content:
                     batch = chunk.get(type_dict["iterable_key"], {}).get("items", [])
                     items.extend(batch)
+
+            # --- NEW: INTERACTIVE RELEASE TYPE FILTER (HEURISTIC ENGINE) ---
+            if getattr(self, '_is_interactive_session', False) and url_type == "artist":
+                import pick
+                
+                # 1. Fast heuristic engine to guess release types without extra API calls
+                def guess_release_type(item):
+                    title = str(item.get("title", "")).lower()
+                    version = str(item.get("version", "")).lower()
+                    t_count = item.get("tracks_count", 0)
+                    
+                    if "live" in version or "(live" in title or "- live" in title:
+                        return "live"
+                    
+                    comp_keywords = ["best of", "greatest hits", "anthology", "collection", "compilation"]
+                    if any(kw in title for kw in comp_keywords) or any(kw in version for kw in comp_keywords):
+                        return "compilation"
+                        
+                    if " ep" in title or version == "ep":
+                        return "ep"
+                        
+                    if "single" in version:
+                        return "single"
+                        
+                    # Fallback to pure track count logic
+                    if 1 <= t_count <= 3:
+                        return "single"
+                    if 4 <= t_count <= 6:
+                        return "ep"
+                        
+                    return "album"
+
+                # 2. Tag all items in memory
+                if items:
+                    for item in items:
+                        item["_guessed_type"] = guess_release_type(item)
+                    
+                    # 3. Identify available types for this specific artist
+                    available_types = set(item["_guessed_type"] for item in items)
+                    
+                    if available_types:
+                        type_map = {"album": "Album", "ep": "EP", "single": "Single", "live": "Live", "compilation": "Compilation"}
+                        
+                        # Sort options intelligently (Albums and EPs first)
+                        options = [type_map[t] for t in ["album", "ep", "single", "live", "compilation"] if t in available_types]
+                        
+                        if options:
+                            title_text = (
+                                f"Found {len(items)} releases for {content_name}.\n"
+                                "Filter by release type [Use arrows to move, Space to select, Enter to confirm]:"
+                            )
+                            
+                            # Trigger the multiselect UI
+                            selected_types_raw = pick.pick(
+                                options, 
+                                title_text, 
+                                multiselect=True, 
+                                min_selection_count=1
+                            )
+                            
+                            if selected_types_raw:
+                                allowed_types = [opt[0].lower() for opt in selected_types_raw]
+                                items = [item for item in items if item.get("_guessed_type") in allowed_types]
+                                logger.info(f"{GREEN}Filtered down to {len(items)} releases.{OFF}")
+                            else:
+                                # User cancelled
+                                items = []
+            # ---------------------------------------------------------------
 
             logger.debug(f"Number of chunks: {len(content)}")
             if content:
@@ -462,6 +530,9 @@ class QobuzDL:
             return
 
     def interactive(self, download=True):
+        # --- NEW: Flag to let the engine know we are in a TTY session ---
+        self._is_interactive_session = True
+        # ----------------------------------------------------------------
         try:
             import pick
             # --- WINDOWS TERMINAL FIX & MULTISELECT LOOK ---
