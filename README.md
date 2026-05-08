@@ -274,7 +274,7 @@ The Ultimate Edition includes powerful local library managers to keep track of y
   Curious about your downloading habits? This command instantly queries your local SQLite database to display your download statistics, including the total number of unique artists fetched and a complete alphabetical list of your library.
   ```bash
   python -m qobuz_dl stats
-```
+  ```
 
 ### 🛠️ Key Formatting Variables
 
