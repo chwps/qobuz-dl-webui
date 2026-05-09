@@ -268,6 +268,123 @@ def check_for_updates():
     except Exception:
         pass
 
+
+def _run_sync_watch():
+    """
+    Periodic sync loop: reads playlists from SYNC_PLAYLISTS env var,
+    runs sync_playlist at SYNC_INTERVAL seconds intervals.
+    Designed for Docker long-running containers.
+    """
+    import time
+
+    playlists_raw = os.environ.get("SYNC_PLAYLISTS", "").strip()
+    if not playlists_raw:
+        logging.error(f"{RED}[!] SYNC_PLAYLISTS environment variable is not set.{OFF}")
+        logging.error(f"{YELLOW}Set it to one or more Qobuz playlist URLs separated by ';'{OFF}")
+        sys.exit(1)
+
+    playlists = [url.strip() for url in playlists_raw.split(";") if url.strip()]
+    interval = int(os.environ.get("SYNC_INTERVAL", "21600"))
+    sync_dir = os.environ.get("SYNC_DIR", None)
+    auto_yes = os.environ.get("SYNC_YES", "false").lower() in ("true", "1", "yes")
+
+    logging.info(f"\n{CYAN}{'='*50}{OFF}")
+    logging.info(f"{CYAN}  Qobuz-DL Sync Watch Mode{OFF}")
+    logging.info(f"{CYAN}{'='*50}{OFF}")
+    logging.info(f"  Playlists  : {len(playlists)}")
+    logging.info(f"  Interval   : {interval}s ({interval//3600}h {interval%3600//60}m)")
+    logging.info(f"  Auto-yes   : {auto_yes}")
+    if sync_dir:
+        logging.info(f"  Download dir : {sync_dir}")
+    logging.info(f"{CYAN}{'='*50}\n")
+
+    def graceful_shutdown(sig, frame):
+        logging.info(f"\n\n{YELLOW}[!] Sync Watch received stop signal. Shutting down gracefully...{OFF}")
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, graceful_shutdown)
+    signal.signal(signal.SIGTERM, graceful_shutdown)
+
+    config = configparser.ConfigParser(interpolation=None)
+    config.read(CONFIG_FILE)
+
+    section = "qobuz" if config.has_section("qobuz") else "DEFAULT"
+
+    email = config.get(section, "email")
+    token = config.get(section, "auth_token", fallback="")
+    password = token if token else config.get(section, "password")
+    app_id = config.get(section, "app_id")
+    secrets = [s for s in config.get(section, "secrets").split(",") if s]
+
+    directory_val = config.get(section, "directory", fallback=None)
+    default_folder = sync_dir if sync_dir else (directory_val or "Qobuz Downloads")
+    default_folder = os.path.expanduser(default_folder)
+
+    default_quality = int(config.get(section, "default_quality", fallback="6"))
+    default_limit = int(config.get(section, "default_limit", fallback="500"))
+    folder_format = config.get(section, "folder_format", fallback=DEFAULT_FOLDER)
+    track_format = config.get(section, "track_format", fallback=DEFAULT_TRACK)
+    force_english = not config.getboolean(section, "native_lang", fallback=False)
+
+    arguments = qobuz_dl_args(default_quality, default_limit, default_folder).parse_args(['sync-watch'])
+
+    settings = QobuzDLSettings.from_arguments_configparser(arguments, config)
+
+    qobuz = QobuzDL(
+        default_folder,
+        arguments.quality,
+        config.getboolean(section, "embed_art", fallback=True),
+        ignore_singles_eps=config.getboolean(section, "albums_only", fallback=False),
+        no_m3u_for_playlists=config.getboolean(section, "no_m3u", fallback=False),
+        quality_fallback=not config.getboolean(section, "no_fallback", fallback=False),
+        cover_og_quality=config.getboolean(section, "og_cover", fallback=True),
+        no_cover=config.getboolean(section, "no_cover", fallback=False),
+        downloads_db=None if config.getboolean(section, "no_database", fallback=False) else QOBUZ_DB,
+        folder_format=folder_format,
+        track_format=track_format,
+        smart_discography=config.getboolean(section, "smart_discography", fallback=False),
+        fetch_lyrics=config.getboolean(section, "fetch_lyrics", fallback=False),
+        no_lrc_files=config.getboolean(section, "no_lrc_files", fallback=False),
+        genius_token=config.get(section, "genius_token", fallback=None),
+        force_english=force_english,
+        no_credits=config.getboolean(section, "no_credits", fallback=False),
+        settings=settings,
+        blacklist=config.get(section, "blacklist", fallback="blacklist.txt"),
+    )
+
+    qobuz.initialize_client(email, password, app_id, secrets)
+
+    from qobuz_dl.sync_playlist import sync_playlist
+
+    run = 0
+    while True:
+        run += 1
+        logging.info(f"{CYAN}[Sync Watch] Run #{run} - {time.strftime('%Y-%m-%d %H:%M:%S')}{OFF}")
+
+        for idx, playlist_url in enumerate(playlists, 1):
+            logging.info(f"{GREEN}  [{idx}/{len(playlists)}] Syncing: {playlist_url}{OFF}")
+            try:
+                sync_playlist(
+                    qobuz,
+                    playlist_url,
+                    default_folder,
+                    auto_confirm=auto_yes,
+                )
+                logging.info(f"{GREEN}  [{idx}/{len(playlists)}] Done.{OFF}")
+            except Exception as e:
+                logging.error(f"{RED}  [{idx}/{len(playlists)}] Error: {e}{OFF}")
+
+        logging.info(f"\n{YELLOW}[Sync Watch] All playlists synced. Sleeping {interval}s ({interval//3600}h {interval%3600//60}m)...{OFF}")
+
+        sleep_end = time.time() + interval
+        while time.time() < sleep_end:
+            remaining = sleep_end - time.time()
+            if remaining > 0:
+                time.sleep(min(remaining, 60))
+
+    logging.info(f"{GREEN}[Sync Watch] Stopped.{OFF}")
+
+
 def main():
     _initial_checks()
     check_for_updates()
@@ -283,6 +400,11 @@ def main():
             print("\n\n\033[91m[!] Radar manually interrupted by the user (CTRL+C).\033[0m")
         sys.exit(0)
     # --------------------------------------------
+
+    # --- SYNC-WATCH MODE (Docker periodic sync loop) ---
+    if len(sys.argv) > 1 and sys.argv[1] in ("sync-watch", "sw"):
+        _run_sync_watch()
+    # --------------------------------------------------
 
     # --- NEW: STATS COMMAND INTEGRATION ---
     if len(sys.argv) > 1 and sys.argv[1] == "stats":

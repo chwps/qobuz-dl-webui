@@ -98,6 +98,23 @@ def sync_playlist_args(subparsers):
     )
     return sync_pl
 
+
+def sync_watch_args(subparsers):
+    sync_watch = subparsers.add_parser(
+        "sync-watch",
+        aliases=["sw"],
+        description="Continuously sync playlists at regular intervals. "
+                    "Designed for Docker containers with periodic scheduling. "
+                    "Reads playlists from SYNC_PLAYLISTS env var (semicolon-separated URLs).",
+        help="periodic sync loop for Docker (reads playlists from SYNC_PLAYLISTS env var)",
+    )
+    sync_watch.add_argument(
+        "--yes", "-y",
+        action="store_true",
+        help="Skip confirmation prompt before deleting/downloading",
+    )
+    return sync_watch
+
 def add_common_arg(custom_parser, default_folder, default_quality):
     custom_parser.add_argument(
         "-d",
@@ -419,10 +436,11 @@ def qobuz_dl_args(
     # Inizializza il nuovo comando
     lyrics_cmd = lyrics_args(subparsers)
     sync_pl_cmd = sync_playlist_args(subparsers)
-    
+    sync_watch_cmd = sync_watch_args(subparsers)
+
     [
         add_common_arg(i, default_folder, default_quality)
-        for i in (interactive, download, lucky, sync_pl_cmd)
+        for i in (interactive, download, lucky, sync_pl_cmd, sync_watch_cmd)
     ]
 
     return parser
