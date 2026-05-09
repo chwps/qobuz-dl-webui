@@ -202,78 +202,44 @@ class QobuzDL:
                     batch = chunk.get(type_dict["iterable_key"], {}).get("items", [])
                     items.extend(batch)
 
-            # --- NEW: INTERACTIVE RELEASE TYPE FILTER (HEURISTIC ENGINE) ---
+            # --- NEW: INTERACTIVE RELEASE TYPE FILTER (LAZY STATIC MENU) ---
             if getattr(self, '_is_interactive_session', False) and url_type == "artist":
                 import pick
                 
-                # 1. Fast heuristic engine to guess release types without extra API calls
-                def guess_release_type(item):
-                    title = str(item.get("title", "")).lower()
-                    version = str(item.get("version", "")).lower()
-                    t_count = item.get("tracks_count", 0)
-                    
-                    if "live" in version or "(live" in title or "- live" in title:
-                        return "live"
-                    
-                    comp_keywords = ["best of", "greatest hits", "anthology", "collection", "compilation"]
-                    if any(kw in title for kw in comp_keywords) or any(kw in version for kw in comp_keywords):
-                        return "compilation"
-                        
-                    if " ep" in title or version == "ep":
-                        return "ep"
-                        
-                    if "single" in version:
-                        return "single"
-                        
-                    # Fallback to pure track count logic
-                    if 1 <= t_count <= 3:
-                        return "single"
-                    if 4 <= t_count <= 6:
-                        return "ep"
-                        
-                    return "album"
-
-                # 2. Tag all items in memory
-                if items:
-                    for item in items:
-                        item["_guessed_type"] = guess_release_type(item)
-                    
-                    # 3. Identify available types for this specific artist
-                    available_types = set(item["_guessed_type"] for item in items)
-                    
-                    if available_types:
-                        type_map = {"album": "Album", "ep": "EP", "single": "Single", "live": "Live", "compilation": "Compilation"}
-                        
-                        # Sort options intelligently (Albums and EPs first)
-                        options = [type_map[t] for t in ["album", "ep", "single", "live", "compilation"] if t in available_types]
-                        
-                        if options:
-                            title_text = (
-                                f"Found {len(items)} releases for {content_name}.\n"
-                                "Filter by release type [Use arrows to move, Space to select, Enter to confirm]:"
-                            )
-                            
-                            # Trigger the multiselect UI
-                            selected_types_raw = pick.pick(
-                                options, 
-                                title_text, 
-                                multiselect=True, 
-                                min_selection_count=1
-                            )
-                            
-                            if selected_types_raw:
-                                allowed_types = [opt[0].lower() for opt in selected_types_raw]
-                                items = [item for item in items if item.get("_guessed_type") in allowed_types]
-                                logger.info(f"{GREEN}Filtered down to {len(items)} releases.{OFF}")
-                            else:
-                                # User cancelled
-                                items = []
+                # 1. Static options for exact Lazy Evaluation
+                options = ["Album", "EP", "Single", "Live", "Compilation"]
+                
+                title_text = (
+                    f"Found {len(items)} total releases for {content_name}.\n"
+                    "Filter by release type [Use arrows to move, Space to select, Enter to confirm]:\n"
+                    "(The exact count per category will be resolved silently during download)"
+                )
+                
+                # Trigger the multiselect UI
+                selected_types_raw = pick.pick(
+                    options, 
+                    title_text, 
+                    multiselect=True, 
+                    min_selection_count=1
+                )
+                
+                if selected_types_raw:
+                    self.allowed_release_types = [opt[0].lower() for opt in selected_types_raw]
+                else:
+                    # User cancelled
+                    self.allowed_release_types = []
+                    items = []
+            else:
+                self.allowed_release_types = None
             # ---------------------------------------------------------------
 
             logger.debug(f"Number of chunks: {len(content)}")
             if content:
                 logger.debug(f"Items in first chunk: {len(content[0].get(type_dict['iterable_key'], {}).get('items', []))}")
-            logger.info(f"{YELLOW}{len(items)} downloads in queue")
+            if getattr(self, 'allowed_release_types', None) is not None:
+                logger.info(f"{YELLOW}[*] Evaluating {len(items)} releases (unwanted types will be skipped silently)...{OFF}")
+            else:
+                logger.info(f"{YELLOW}{len(items)} downloads in queue{OFF}")
             
             # --- START PLAYLIST LOGIC (Flat Folder) ---
             is_playlist = (url_type == "playlist")
@@ -287,6 +253,60 @@ class QobuzDL:
 
             # Use enumerate to get the track number in the playlist (1, 2, 3...)
             for idx, item in enumerate(items, start=1):
+                
+                # --- NEW: ULTIMATE SMART RECONCILER (LAZY + HEURISTIC) ---
+                if getattr(self, 'allowed_release_types', None) and url_type == "artist":
+                    try:
+                        r_type = "unknown"
+                        
+                        # 1. Attempt to fetch official Qobuz tag
+                        full_meta = None
+                        if hasattr(self.client, "get_album_meta"):
+                            full_meta = self.client.get_album_meta(item["id"])
+                        elif hasattr(self.client, "get_album"):
+                            full_meta = self.client.get_album(item["id"])
+                            
+                        if full_meta:
+                            r_type = (full_meta.get("release_type") or full_meta.get("product_type") or "unknown").lower()
+                            
+                        # 2. Smart Reconciliation (Fixing Qobuz's bad data while protecting Pink Floyd)
+                        base_title = str(item.get("title", "")).lower()
+                        version_tag = str(item.get("version", "")).lower()
+                        t_count = item.get("tracks_count", 0)
+                        
+                        # Absolute keyword overrides (Human titles beat Qobuz database tags)
+                        if "live" in version_tag or "(live" in base_title or "- live" in base_title:
+                            r_type = "live"
+                        elif any(kw in base_title or kw in version_tag for kw in ["best of", "greatest hits", "anthology", "collection", "compilation"]):
+                            r_type = "compilation"
+                        elif " ep" in base_title or version_tag == "ep":
+                            r_type = "ep"
+                            
+                        # Track-count conflict resolution
+                        elif r_type == "single" and t_count >= 4:
+                            r_type = "ep"  # Fixes Belly's 4-track EPs tagged as Singles by Qobuz
+                        elif r_type == "ep" and 1 <= t_count <= 3:
+                            r_type = "single"
+                        elif r_type == "album" and 1 <= t_count <= 3:
+                            r_type = "single"
+                        # If Qobuz says "album" and tracks >= 4 (like Pink Floyd), we leave it alone!
+                        
+                        # Fallback for completely missing data
+                        elif r_type == "unknown":
+                            if 1 <= t_count <= 3:
+                                r_type = "single"
+                            elif 4 <= t_count <= 6:
+                                r_type = "ep"
+                            else:
+                                r_type = "album"
+
+                        # 3. Perform the silent skip check
+                        if r_type not in self.allowed_release_types:
+                            continue
+                            
+                    except Exception:
+                        pass
+                # ---------------------------------------------------------    
                 
                 if getattr(self, 'blacklist_patterns', None):
                     base_title = item.get("title") or item.get("name") or ""
