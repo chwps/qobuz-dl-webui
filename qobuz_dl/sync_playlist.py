@@ -1,27 +1,43 @@
 """
 Bidirectional sync between a local folder and a Qobuz playlist.
+Uses a Yubal-inspired structure: artist/year - album/NN - track.
+Playlist M3U and cover files go into {directory}/_Playlists/.
 """
 
 import os
+import re
 import logging
+from pathlib import Path
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3
 
 from qobuz_dl.color import CYAN, GREEN, RED, YELLOW, OFF
+from qobuz_dl.utils import get_url_info
 
 logger = logging.getLogger(__name__)
 
-def _scan_local_tracks(directory):
+# Yubal-inspired defaults
+DEFAULT_PLAYLIST_FOLDER_FORMAT = "{album_artist}/{year} - {album_title}"
+DEFAULT_PLAYLIST_TRACK_FORMAT = "{track_number:02d} - {track_title}"
+
+
+def _scan_local_tracks(base_directory, exclude_dirs=None):
     """
-    Walk the directory and build a dict of {qobuz_track_id: file_path}
+    Walk the base directory and build a dict of {qobuz_track_id: file_path}
     by reading the QOBUZTRACKID tag from each audio file.
+    Excludes _Playlists/ and any dirs in exclude_dirs.
     """
     local_tracks = {}
     untagged_files = []
+    exclude = set(exclude_dirs or [])
+    exclude.add("_Playlists")
 
-    for root, _, files in os.walk(directory):
+    for root, dirs, files in os.walk(base_directory):
+        # Prune excluded directories
+        dirs[:] = [d for d in dirs if d not in exclude]
+
         for fname in files:
-            if not fname.lower().endswith(('.flac', '.mp3')):
+            if not fname.lower().endswith(('.flac', '.mp3', '.wav', '.ogg')):
                 continue
 
             fpath = os.path.join(root, fname)
@@ -32,10 +48,13 @@ def _scan_local_tracks(directory):
                     audio = FLAC(fpath)
                     track_id = audio.get("QOBUZTRACKID", [None])[0]
                 else:
-                    audio = ID3(fpath)
-                    txxx = audio.get("TXXX:QOBUZTRACKID")
-                    if txxx:
-                        track_id = txxx.text[0]
+                    try:
+                        audio = ID3(fpath)
+                        txxx = audio.get("TXXX:QOBUZTRACKID")
+                        if txxx:
+                            track_id = txxx.text[0]
+                    except Exception:
+                        pass
             except Exception as e:
                 logger.debug(f"Failed to read tags from {fpath}: {e}")
 
@@ -50,31 +69,103 @@ def _scan_local_tracks(directory):
 def _fetch_remote_tracks(client, playlist_id):
     """
     Fetch all tracks from a Qobuz playlist via the paginated API.
-    Returns a tuple: (playlist_name, all_items)
+    Returns a tuple: (playlist_name, all_items, cover_url)
     """
     all_items = []
     playlist_name = "Unknown Playlist"
+    cover_url = None
     for chunk in client.get_plist_meta(playlist_id):
         if "name" in chunk and playlist_name == "Unknown Playlist":
             playlist_name = chunk.get("name")
+        if "image" in chunk and not cover_url:
+            img = chunk.get("image", {})
+            cover_url = img.get("large", img.get("code", ""))
         items = chunk.get("tracks", {}).get("items", [])
         all_items.extend(items)
-    return playlist_name, all_items
+    return playlist_name, all_items, cover_url
 
 
-def _sanitize_dirname(name):
-    """Remove invalid characters for OS directory names."""
+def _sanitize_filename(name):
+    """Remove invalid characters for OS filenames and paths."""
     invalid_chars = '<>:"/\\|?*'
     for char in invalid_chars:
         name = name.replace(char, '_')
     return name.strip()
 
 
+def _format_path(pattern, context, base_dir):
+    """
+    Format a path using the given pattern and context dict.
+    Sanitizes each path component.
+    Returns a full path string.
+    """
+    from qobuz_dl.utils import PartialFormatter
+
+    fmt = PartialFormatter()
+    formatted = fmt.format(pattern, **context)
+
+    # Split by / and sanitize each component
+    parts = []
+    for part in formatted.split("/"):
+        part = _sanitize_filename(part.strip())
+        if part:
+            parts.append(part)
+
+    if not parts:
+        parts = ["Unknown"]
+
+    return os.path.join(base_dir, *parts)
+
+
+def _download_playlist_cover(base_directory, playlist_name, playlist_id, cover_url):
+    """Download playlist cover and save in _Playlists/."""
+    import urllib.request
+    from urllib.error import HTTPError, URLError
+
+    if not cover_url:
+        return None
+
+    playlists_dir = os.path.join(base_directory, "_Playlists")
+    os.makedirs(playlists_dir, exist_ok=True)
+
+    safe_name = _sanitize_filename(playlist_name)
+    id_suffix = playlist_id[-8:] if len(playlist_id) > 8 else playlist_id
+    cover_filename = f"{safe_name} [{id_suffix}].jpg"
+    cover_path = os.path.join(playlists_dir, cover_filename)
+
+    try:
+        req = urllib.request.Request(
+            cover_url,
+            headers={"User-Agent": "qobuz-dl/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = resp.read()
+        with open(cover_path, "wb") as f:
+            f.write(data)
+        logger.info(f"  {CYAN}[+] Cover saved: {cover_path}{OFF}")
+        return cover_path
+    except (HTTPError, URLError, OSError) as e:
+        logger.debug(f"Failed to download cover: {e}")
+        return None
+
+
 def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
     """
     Main entry point for playlist sync.
+
+    Structure (Yubal-inspired):
+      QobuzDownloads/
+        |-- _Playlists/
+        |     |-- Playlist Name [abc12345].m3u
+        |     |-- Playlist Name [abc12345].jpg
+        |-- Artist1/
+        |     |-- 2024 - Album1/
+        |     |     |-- 01 - Track1.flac
+        |-- Artist2/
+        |     |-- 2019 - Album2/
+        |           |-- 01 - Track1.flac
     """
-    from qobuz_dl.utils import get_url_info, make_m3u
+    from qobuz_dl.utils import make_m3u_playlist
 
     # --- 1. Parse and validate URL ---
     try:
@@ -94,8 +185,8 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
     logger.info(f"{YELLOW}URL : {url}{OFF}")
 
     # --- 2. Fetch remote playlist ---
-    logger.info(f"{CYAN}[1/4] Fetching playlist from Qobuz...{OFF}")
-    playlist_name, remote_items = _fetch_remote_tracks(qobuz_dl.client, playlist_id)
+    logger.info(f"{CYAN}[1/5] Fetching playlist from Qobuz...{OFF}")
+    playlist_name, remote_items, cover_url = _fetch_remote_tracks(qobuz_dl.client, playlist_id)
     remote_ids = {str(item["id"]): item for item in remote_items}
     logger.info(f"{CYAN}      Found {len(remote_ids)} tracks in the Qobuz playlist.{OFF}")
 
@@ -103,23 +194,20 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
         logger.info(f"{YELLOW}The Qobuz playlist is empty. Nothing to sync.{OFF}")
         return
 
-    # --- Smart Folder Logic ---
-    # Append the playlist name to the base directory, exactly like 'dl' does.
-    # Prevents double-nesting if the user already provided the full path.
-    safe_playlist_name = _sanitize_dirname(playlist_name)
-    base_name = os.path.basename(os.path.normpath(folder))
-    
-    if base_name == safe_playlist_name:
-        target_folder = folder
-    else:
-        target_folder = os.path.join(folder, safe_playlist_name)
+    # --- Base directory & _Playlists ---
+    base_directory = folder  # e.g. /app/QobuzDownloads
+    playlists_dir = os.path.join(base_directory, "_Playlists")
+    os.makedirs(playlists_dir, exist_ok=True)
 
-    logger.info(f"{YELLOW}DIR : {target_folder}{OFF}\n")
+    # Playlist filename suffix (like Yubal)
+    safe_playlist_name = _sanitize_filename(playlist_name)
+    id_suffix = playlist_id[-8:] if len(playlist_id) > 8 else playlist_id
+    logger.info(f"{YELLOW}PL  : {safe_playlist_name} [{id_suffix}]{OFF}")
+    logger.info(f"{YELLOW}DIR : {base_directory}{OFF}\n")
 
-    # --- 3. Scan local folder ---
-    os.makedirs(target_folder, exist_ok=True)
-    logger.info(f"{CYAN}[2/4] Scanning local folder...{OFF}")
-    local_tracks, untagged = _scan_local_tracks(target_folder)
+    # --- 3. Scan local tracks across ENTIRE base directory ---
+    logger.info(f"{CYAN}[2/5] Scanning local folder...{OFF}")
+    local_tracks, untagged = _scan_local_tracks(base_directory)
     logger.info(f"{CYAN}      Found {len(local_tracks)} tagged tracks locally.{OFF}")
     if untagged:
         logger.info(
@@ -134,18 +222,16 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
     to_delete_ids = local_id_set - remote_id_set
     already_synced = local_id_set & remote_id_set
 
-    logger.info(f"\n{CYAN}[3/4] Sync summary:{OFF}")
+    logger.info(f"\n{CYAN}[3/5] Sync summary:{OFF}")
     logger.info(f"  {GREEN}↓ To download : {len(to_download_ids)} tracks{OFF}")
     logger.info(f"  {RED}✕ To delete   : {len(to_delete_ids)} files{OFF}")
     logger.info(f"    Already synced: {len(already_synced)} tracks")
 
     if not to_download_ids and not to_delete_ids:
         logger.info(f"\n{GREEN}✓ Folder is already in sync with the playlist!{OFF}")
-        
-        # Rigeneriamo comunque il file .m3u nel caso in cui l'ordine online sia cambiato
-        if not getattr(qobuz_dl, 'no_m3u_for_playlists', False):
-            make_m3u(target_folder, remote_items)
-            logger.info(f"{CYAN}✓ Playlist .m3u file updated with latest track order.{OFF}")
+
+        # Update M3U anyway (order may have changed)
+        _build_m3u(base_directory, playlist_name, playlist_id, remote_items)
         return
 
     # Print file-level details
@@ -176,9 +262,9 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
             return
 
     # --- 5. Execute sync ---
-    logger.info(f"\n{CYAN}[4/4] Executing sync...{OFF}")
+    logger.info(f"\n{CYAN}[4/5] Executing sync...{OFF}")
 
-    # 5a. Delete stale files (audio + companion .lrc)
+    # 5a. Delete stale files
     deleted_count = 0
     for tid in to_delete_ids:
         fpath = local_tracks[tid]
@@ -187,7 +273,6 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
             deleted_count += 1
             logger.info(f"  {RED}[-] Deleted: {os.path.basename(fpath)}{OFF}")
 
-            # Also remove the companion .lrc file if it exists
             lrc_path = os.path.splitext(fpath)[0] + ".lrc"
             if os.path.isfile(lrc_path):
                 os.remove(lrc_path)
@@ -195,13 +280,16 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
         except OSError as e:
             logger.error(f"  {RED}[!] Failed to delete {fpath}: {e}{OFF}")
 
-    # 5b. Download missing tracks using flat folder mode
+    # 5b. Download missing tracks using Yubal-inspired folder structure
     original_folder_format = qobuz_dl.folder_format
+    original_track_format = qobuz_dl.track_format if hasattr(qobuz_dl, 'track_format') else None
     original_multi_disc = qobuz_dl.settings.multiple_disc_one_dir
-    qobuz_dl.folder_format = "."
+
+    qobuz_dl.folder_format = DEFAULT_PLAYLIST_FOLDER_FORMAT
+    qobuz_dl.track_format = DEFAULT_PLAYLIST_TRACK_FORMAT
     qobuz_dl.settings.multiple_disc_one_dir = True
 
-    # Build a mapping of remote_id -> playlist position for track numbering
+    # Build position map for track numbering
     position_map = {}
     for idx, item in enumerate(remote_items, start=1):
         position_map[str(item["id"])] = idx
@@ -213,7 +301,7 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
             qobuz_dl.download_from_id(
                 tid,
                 album=False,
-                alt_path=target_folder,
+                alt_path=base_directory,
                 is_playlist=True,
                 playlist_index=playlist_idx,
             )
@@ -223,14 +311,39 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
 
     # Restore original settings
     qobuz_dl.folder_format = original_folder_format
+    if original_track_format and hasattr(qobuz_dl, 'track_format'):
+        qobuz_dl.track_format = original_track_format
     qobuz_dl.settings.multiple_disc_one_dir = original_multi_disc
 
-    # Regenerate .m3u if configured
-    if not getattr(qobuz_dl, 'no_m3u_for_playlists', False):
-        make_m3u(target_folder, remote_items)
+    # --- 6. Generate artifacts ---
+    logger.info(f"\n{CYAN}[5/5] Generating playlist artifacts...{OFF}")
+
+    # M3U
+    _build_m3u(base_directory, playlist_name, playlist_id, remote_items)
+
+    # Cover
+    if cover_url:
+        _download_playlist_cover(base_directory, playlist_name, playlist_id, cover_url)
 
     # --- Final summary ---
     logger.info(f"\n{GREEN}━━━ SYNC COMPLETE ━━━{OFF}")
     logger.info(f"  {GREEN}↓ Downloaded : {downloaded_count} tracks{OFF}")
     logger.info(f"  {RED}✕ Deleted    : {deleted_count} files{OFF}")
     logger.info(f"  {GREEN}✓ Total now  : {len(remote_ids)} tracks{OFF}\n")
+
+
+def _build_m3u(base_directory, playlist_name, playlist_id, remote_items):
+    """
+    Build M3U file in _Playlists/ with relative paths to tracks.
+    """
+    from qobuz_dl.utils import make_m3u_playlist
+
+    playlists_dir = os.path.join(base_directory, "_Playlists")
+    os.makedirs(playlists_dir, exist_ok=True)
+
+    safe_name = _sanitize_filename(playlist_name)
+    id_suffix = playlist_id[-8:] if len(playlist_id) > 8 else playlist_id
+    m3u_path = os.path.join(playlists_dir, f"{safe_name} [{id_suffix}].m3u")
+
+    make_m3u_playlist(base_directory, playlists_dir, m3u_path, remote_items)
+    logger.info(f"  {CYAN}[+] M3U updated: {m3u_path}{OFF}")

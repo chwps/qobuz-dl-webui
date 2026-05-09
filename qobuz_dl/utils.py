@@ -37,6 +37,123 @@ class PartialFormatter(string.Formatter):
                 return self.bad_fmt
             raise
 
+def make_m3u_playlist(base_directory, playlists_dir, m3u_path, remote_items=None):
+    """
+    Generate M3U playlist file in _Playlists/ directory.
+    Uses relative paths from _Playlists/ to tracks.
+    Supports ordering by remote_items (Qobuz API) using 4-pass matching.
+    """
+    import os
+    import re
+    import logging
+    from mutagen.id3 import ID3
+    from mutagen.flac import FLAC
+    from mutagen import File
+
+    logger = logging.getLogger(__name__)
+    EXTENSIONS = (".mp3", ".flac", ".wav", ".ogg")
+
+    track_list = ["#EXTM3U"]
+
+    # 1. Scan the base directory (excluding _Playlists) for audio files
+    local_files_info = []
+    for local, dirs, files in os.walk(base_directory):
+        # Skip _Playlists directory
+        dirs[:] = [d for d in dirs if d != "_Playlists"]
+        dirs.sort()
+
+        for f in files:
+            if os.path.splitext(f)[-1].lower() in EXTENSIONS:
+                audio_full_path = os.path.abspath(os.path.join(local, f))
+                info = {
+                    'path': audio_full_path,
+                    'title': '',
+                    'artist': '',
+                    'isrc': '',
+                    'qobuz_id': '',
+                    'duration': 0
+                }
+                try:
+                    audio_gen = File(audio_full_path)
+                    if audio_gen and audio_gen.info:
+                        info['duration'] = int(audio_gen.info.length)
+
+                    if audio_full_path.lower().endswith('.flac'):
+                        audio = FLAC(audio_full_path)
+                        info['qobuz_id'] = audio.get("QOBUZTRACKID", [None])[0]
+                        info['isrc'] = audio.get("ISRC", [None])[0]
+                        info['title'] = audio.get("TITLE", [""])[0]
+                        info['artist'] = audio.get("ARTIST", [""])[0]
+                    else:
+                        try:
+                            audio = ID3(audio_full_path)
+                            for frame in audio.getall("TXXX"):
+                                if frame.desc.upper() == "QOBUZTRACKID":
+                                    info['qobuz_id'] = frame.text[0]
+                                    break
+                            isrc_frame = audio.get("TSRC")
+                            info['isrc'] = isrc_frame.text[0] if isrc_frame else None
+                            tit2 = audio.get("TIT2")
+                            info['title'] = tit2.text[0] if tit2 else ""
+                            tpe1 = audio.get("TPE1")
+                            info['artist'] = tpe1.text[0] if tpe1 else ""
+                        except Exception:
+                            pass
+                except Exception as e:
+                    logger.debug(f"Error reading tags for {f}: {e}")
+                    info['title'] = os.path.splitext(f)[0]
+
+                local_files_info.append(info)
+
+    ordered_files = []
+
+    # 2. Match with Qobuz API order (4-Pass Algorithm)
+    if remote_items:
+        by_tid = {str(f['qobuz_id']): f for f in local_files_info if f.get('qobuz_id')}
+        by_isrc = {str(f['isrc']): f for f in local_files_info if f.get('isrc')}
+        by_title = {str(f['title']).strip().lower(): f for f in local_files_info if f.get('title')}
+
+        for item in remote_items:
+            tid = str(item.get("id", ""))
+            isrc = str(item.get("isrc", ""))
+            track_title = item.get("title", "Unknown Title")
+
+            # 3-pass lookup
+            best_match = by_tid.get(tid) or by_isrc.get(isrc) or by_title.get(track_title.strip().lower())
+
+            # Pass 4: filename substring
+            if not best_match and track_title != "Unknown Title":
+                for f_info in local_files_info:
+                    if track_title.lower() in os.path.basename(f_info['path']).lower():
+                        best_match = f_info
+                        break
+
+            if best_match:
+                ordered_files.append(best_match)
+
+    # 3. Fallback: natural sort
+    if not ordered_files:
+        def natural_sort_key(s):
+            return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
+        ordered_files = sorted(local_files_info, key=lambda x: natural_sort_key(os.path.basename(x['path'])))
+
+    # 4. Generate M3U with relative paths from _Playlists/
+    m3u_parent = os.path.dirname(m3u_path)
+    for f_info in ordered_files:
+        audio_rel_path = os.path.relpath(f_info['path'], m3u_parent)
+
+        disp_title = f_info['title'] or "Unknown Title"
+        disp_artist = f_info['artist'] or "Unknown Artist"
+        length = f_info['duration']
+
+        index = f"#EXTINF:{length},{disp_artist} - {disp_title}\n{audio_rel_path}"
+        track_list.append(index)
+
+    if len(track_list) > 1:
+        with open(m3u_path, "w", encoding="utf-8") as pl:
+            pl.write("\n".join(track_list))
+
+
 def make_m3u(pl_directory, remote_items=None):
     """
     Generates a .m3u playlist file.
