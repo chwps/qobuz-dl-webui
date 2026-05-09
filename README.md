@@ -161,7 +161,7 @@ Since Qobuz blocked direct password logins for third-party applications, you nee
 
 ```text
 [Global Commands & Database Management]
-usage: python -m qobuz_dl [-h] [-r] [-p] [--sync-db [PATH]] [-sc] {interactive,i,fun,dl,lucky,lyrics,radar,sync-playlist,sp,stats} ...
+usage: python -m qobuz_dl [-h] [-r] [-p] [--sync-db [PATH]] [-sc] {interactive,i,fun,dl,lucky,lyrics,radar,sync-playlist,sp,sync-watch,sw,stats} ...
 
 [Download Usage]
 usage: python -m qobuz_dl dl [-h] [-d PATH] [-q int] [--albums-only] [--no-m3u] [--no-fallback] [--no-db] 
@@ -275,6 +275,51 @@ The Ultimate Edition includes powerful local library managers to keep track of y
   ```bash
   python -m qobuz_dl stats
   ```
+
+* **Periodic Sync Watch (`sync-watch` / `sw`):**
+  Automatically sync one or more Qobuz playlists at regular intervals. Designed to run inside Docker containers for hands-free library management. Configure everything through environment variables -- no CLI arguments needed.
+
+  **Quick start with Docker Compose:**
+  A `docker-compose.yml` example is included in this repository. Edit the `SYNC_PLAYLISTS` variable with your playlist URLs, then:
+  ```bash
+  # First run: initialize your config
+  docker compose run --rm qobuz-dl-sync -r
+
+  # Start the periodic sync daemon
+  docker compose up -d
+  ```
+
+  **Quick start with docker run:**
+  ```bash
+  docker run -d --rm \
+    --name qobuz-dl-sync \
+    -v /path/to/config:/root/.config/qobuz-dl \
+    -v /path/to/music:/music \
+    -e SYNC_PLAYLISTS="https://play.qobuz.com/playlist/12345;https://play.qobuz.com/playlist/67890" \
+    -e SYNC_INTERVAL=21600 \
+    -e SYNC_DIR=/music \
+    -e SYNC_YES=true \
+    qobuz-dl:latest sync-watch
+  ```
+
+  **Environment variables:**
+
+  | Variable | Description | Default |
+  |---|---|---|
+  | `SYNC_INTERVAL` | Seconds between each sync cycle | `21600` (6 hours) |
+  | `SYNC_PLAYLISTS` | One or more Qobuz playlist URLs, separated by `;` | (required) |
+  | `SYNC_DIR` | Override download directory (ignores config.ini) | value from `config.ini` |
+  | `SYNC_YES` | Skip confirmation prompts (`true`/`false`) | `false` |
+
+  **Standalone CLI usage:**
+  You can also run sync-watch directly without Docker (e.g., in a screen/tmux session):
+  ```bash
+  export SYNC_PLAYLISTS="https://play.qobuz.com/playlist/12345"
+  export SYNC_INTERVAL=3600
+  python -m qobuz_dl sync-watch
+  ```
+
+  The loop is interrupt-safe: sending `SIGTERM` or `SIGINT` (e.g., `docker stop` or `CTRL+C`) gracefully stops the current sync and exits cleanly.
 
 ### 🛠️ Key Formatting Variables
 

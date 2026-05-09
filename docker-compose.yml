@@ -1,0 +1,37 @@
+# Qobuz-DL Sync Watch Mode
+# Periodically sync Qobuz playlists to a local directory.
+#
+# Quick start:
+#   1. Edit SYNC_PLAYLISTS below with your Qobuz playlist URLs
+#   2. Create config: docker compose run --rm qobuz-dl-sync -r
+#   3. Start sync:    docker compose up -d
+#
+
+services:
+  qobuz-dl-sync:
+    build: .
+    container_name: qobuz-dl-sync
+    environment:
+      # Interval in seconds between each sync run (default: 21600 = 6 hours)
+      - SYNC_INTERVAL=21600
+
+      # One or more Qobuz playlist URLs, separated by semicolons
+      # Example: https://play.qobuz.com/playlist/12345;https://play.qobuz.com/playlist/67890
+      - SYNC_PLAYLISTS=
+
+      # Override the download directory (optional - uses config.ini 'directory' if not set)
+      # - SYNC_DIR=/music
+
+      # Skip interactive confirmation prompts (set to 'true' for unattended)
+      - SYNC_YES=true
+
+    volumes:
+      # Persist the config file (created on first run with 'qobuz-dl -r')
+      - ./config:/root/.config/qobuz-dl
+
+      # Your music library mount point
+      - ./music:/music
+
+    restart: unless-stopped
+    entrypoint: ["python", "-m", "qobuz_dl"]
+    command: ["sync-watch"]
