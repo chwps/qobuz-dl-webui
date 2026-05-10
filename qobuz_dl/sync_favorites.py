@@ -5,6 +5,10 @@ Fetches user's favorited tracks from Qobuz, downloads missing ones,
 and optionally syncs star status to Navidrome via Subsonic API.
 
 Uses the same Yubal-inspired folder structure as playlist sync.
+Tracks are stored directly in the base directory (Artist/Album/),
+NOT in a separate subdirectory.
+
+v3: Added source tracking via DB, delete_removed control, and safety checks.
 """
 
 import logging
@@ -15,7 +19,7 @@ from mutagen.id3 import ID3
 from difflib import SequenceMatcher
 
 from qobuz_dl.color import CYAN, GREEN, RED, YELLOW, OFF, MAGENTA
-from qobuz_dl.constants import DEFAULT_PLAYLIST_FOLDER_FORMAT, DEFAULT_PLAYLIST_TRACK_FORMAT
+from qobuz_dl.constants import DEFAULT_FAVORITES_FOLDER_FORMAT, DEFAULT_FAVORITES_TRACK_FORMAT
 from qobuz_dl.sync_playlist import (
     _scan_local_tracks,
     _sanitize_filename,
@@ -23,6 +27,7 @@ from qobuz_dl.sync_playlist import (
     _format_path,
 )
 from qobuz_dl.navidrome_api import NavidromeClient
+from qobuz_dl.db import handle_download_id, count_active_sources, remove_source_entry
 
 logger = logging.getLogger(__name__)
 
@@ -76,14 +81,6 @@ def _fetch_favorites_tracks(client):
     """
     Fetch all favorited tracks from Qobuz via paginated API.
 
-    Qobuz API response structure for favorite/getUserFavorites with fav_type="tracks":
-    {
-        "tracks": {
-            "items": [ { "id": ..., "title": ..., "performer": {...}, ... }, ... ],
-            "total": N
-        }
-    }
-
     Returns list of track dicts from Qobuz.
     """
     fav_type = "tracks"
@@ -96,8 +93,6 @@ def _fetch_favorites_tracks(client):
         if not result:
             break
 
-        # The API returns { fav_type: { "items": [...], "total": N } }
-        # So for fav_type="tracks", it's { "tracks": { "items": [...], "total": N } }
         fav_data = result.get(fav_type, {})
         items = fav_data.get("items", [])
         total = fav_data.get("total", 0)
@@ -125,13 +120,7 @@ def _find_navidrome_track(nd_client, qobuz_item, local_tags=None):
     2. Title + Artist exact search
     3. Fuzzy match by title + artist + duration
 
-    Args:
-        nd_client: NavidromeClient instance
-        qobuz_item: Qobuz track dict (has 'id', 'title', 'performer', 'album', 'duration')
-        local_tags: Optional dict from _read_track_tags() with local file tags
-
-    Returns:
-        Navidrome song_id string, or None if not found
+    Returns Navidrome song_id string, or None if not found
     """
     q_title = qobuz_item.get("title", "")
     performer = qobuz_item.get("performer", {}).get("name", "")
@@ -143,7 +132,6 @@ def _find_navidrome_track(nd_client, qobuz_item, local_tags=None):
     if local_tags and local_tags.get("isrc"):
         isrc = local_tags["isrc"]
     else:
-        # Try to get ISRC from Qobuz track info
         isrc = qobuz_item.get("isrc", "")
 
     # --- Strategy 1: ISRC search ---
@@ -167,7 +155,6 @@ def _find_navidrome_track(nd_client, qobuz_item, local_tags=None):
     for r in results:
         if (r["title"].lower() == q_title.lower() and
                 r["artist"].lower() == q_artist.lower()):
-            # Also check duration if available
             if q_duration and r.get("duration", 0):
                 if abs(r["duration"] - q_duration) > 3:
                     continue
@@ -181,17 +168,15 @@ def _find_navidrome_track(nd_client, qobuz_item, local_tags=None):
         title_ratio = SequenceMatcher(None, q_title.lower(), r["title"].lower()).ratio()
         artist_ratio = SequenceMatcher(None, q_artist.lower(), r["artist"].lower()).ratio()
 
-        # Weight title more heavily
         combined = title_ratio * 0.7 + artist_ratio * 0.3
 
-        # Bonus for duration match
         dur_bonus = 0.0
         if q_duration and r.get("duration", 0):
             dur_diff = abs(r["duration"] - q_duration)
             if dur_diff <= 2:
                 dur_bonus = 0.1
             elif dur_diff > 10:
-                continue  # Skip way-off durations
+                continue
 
         score = combined + dur_bonus
 
@@ -199,11 +184,33 @@ def _find_navidrome_track(nd_client, qobuz_item, local_tags=None):
             best_score = score
             best_id = r["id"]
 
-    # Accept if score is high enough
     if best_score >= 0.75:
         return best_id
 
     return None
+
+
+def _check_can_delete(track_id, fpath, db_path, nd_client, qobuz_item, local_tags=None):
+    """
+    Check if a track can be safely deleted.
+
+    Returns (can_delete: bool, reason: str)
+    """
+    # 1. Check DB for other active sources
+    if db_path:
+        active_count = count_active_sources(db_path, track_id)
+        if active_count > 1:
+            return False, f"DB: {active_count} active sources claim this track"
+
+    # 2. Check Navidrome for other playlists
+    if nd_client and qobuz_item:
+        nd_song_id = _find_navidrome_track(nd_client, qobuz_item, local_tags)
+        if nd_song_id:
+            playlists = nd_client.get_playlists_for_song(nd_song_id)
+            if playlists:
+                return False, f"Navidrome: track in {len(playlists)} playlist(s): {', '.join(playlists[:3])}"
+
+    return True, ""
 
 
 # ---------------------------------------------------------------------------
@@ -213,14 +220,16 @@ def _find_navidrome_track(nd_client, qobuz_item, local_tags=None):
 def sync_favorites(qobuz_dl, folder, auto_confirm=False,
                    folder_format=None, track_format=None,
                    navidrome_url=None, navidrome_user=None, navidrome_password=None,
-                   star_to_navidrome=True):
+                   star_to_navidrome=True,
+                   delete_removed=False,
+                   db_path=None):
     """
     Main entry point for favorites sync.
 
     Steps:
     1. Fetch favorites from Qobuz
     2. Scan local folder for existing tracks
-    3. Compute diff (download missing, note removed)
+    3. Compute diff (download missing, optionally delete removed)
     4. Download missing tracks
     5. Sync star status to Navidrome (optional)
 
@@ -234,20 +243,42 @@ def sync_favorites(qobuz_dl, folder, auto_confirm=False,
         navidrome_user: Navidrome username
         navidrome_password: Navidrome password
         star_to_navidrome: Whether to sync stars to Navidrome
+        delete_removed: Whether to delete tracks no longer in favorites (default: False)
+        db_path: Path to SQLite DB for source tracking (optional)
     """
     from qobuz_dl.utils import make_m3u_playlist
 
-    pl_folder_format = folder_format or DEFAULT_PLAYLIST_FOLDER_FORMAT
-    pl_track_format = track_format or DEFAULT_PLAYLIST_TRACK_FORMAT
+    pl_folder_format = folder_format or DEFAULT_FAVORITES_FOLDER_FORMAT
+    pl_track_format = track_format or DEFAULT_FAVORITES_TRACK_FORMAT
 
+    # Favorites stored directly in base directory (no subdirectory)
     base_directory = folder
+    os.makedirs(base_directory, exist_ok=True)
+    source = "favorites"
 
     logger.info(f"\n{YELLOW}{'='*50}{OFF}")
     logger.info(f"{YELLOW}  QOBUZ FAVORITES SYNC{OFF}")
     logger.info(f"{YELLOW}{'='*50}{OFF}\n")
+    logger.info(f"{YELLOW}DIR : {base_directory}{OFF}")
+    logger.info(f"{YELLOW}SRC : {source}{OFF}")
+    if delete_removed:
+        logger.info(f"{YELLOW}DEL : enabled{OFF}")
+    else:
+        logger.info(f"{YELLOW}DEL : disabled (stale files kept){OFF}")
+    logger.info("")
+
+    # --- Initialize Navidrome client ---
+    nd_client = None
+    if navidrome_url and navidrome_user and navidrome_password:
+        try:
+            nd_client = NavidromeClient(navidrome_url, navidrome_user, navidrome_password)
+            if nd_client.test_connection():
+                logger.info(f"{CYAN}      Navidrome connected for safety checks.{OFF}")
+        except Exception as e:
+            logger.debug(f"Navidrome connection failed: {e}")
 
     # --- 1. Fetch remote favorites ---
-    logger.info(f"{CYAN}[1/6] Fetching favorites from Qobuz...{OFF}")
+    logger.info(f"{CYAN}[1/7] Fetching favorites from Qobuz...{OFF}")
     try:
         remote_items = _fetch_favorites_tracks(qobuz_dl.client)
     except Exception as e:
@@ -262,7 +293,7 @@ def sync_favorites(qobuz_dl, folder, auto_confirm=False,
         return
 
     # --- 2. Scan local tracks ---
-    logger.info(f"\n{CYAN}[2/6] Scanning local folder...{OFF}")
+    logger.info(f"\n{CYAN}[2/7] Scanning local folder...{OFF}")
     local_tracks, untagged = _scan_local_tracks(base_directory)
     logger.info(f"{CYAN}      Found {len(local_tracks)} tagged tracks locally.{OFF}")
     if untagged:
@@ -275,37 +306,79 @@ def sync_favorites(qobuz_dl, folder, auto_confirm=False,
     remote_id_set = set(remote_ids.keys())
 
     to_download_ids = remote_id_set - local_id_set
-    to_delete_ids = local_id_set - remote_id_set
+    raw_to_delete_ids = local_id_set - remote_id_set
     already_synced = local_id_set & remote_id_set
 
-    logger.info(f"\n{CYAN}[3/6] Sync summary:{OFF}")
+    # --- 4. Safety check for deletions ---
+    actually_to_delete = set()
+    protected_count = 0
+
+    if delete_removed and raw_to_delete_ids:
+        for tid in raw_to_delete_ids:
+            fpath = local_tracks[tid]
+            local_tags = _read_track_tags(fpath)
+            qobuz_item = None  # We don't have the Qobuz data for removed tracks
+
+            can_del, reason = _check_can_delete(tid, fpath, db_path, nd_client, qobuz_item, local_tags)
+            if can_del:
+                actually_to_delete.add(tid)
+            else:
+                protected_count += 1
+                logger.info(f"  {YELLOW}[!] Protected: {os.path.basename(fpath)} ({reason}){OFF}")
+    elif not delete_removed:
+        actually_to_delete = set()
+        protected_count = len(raw_to_delete_ids)
+
+    logger.info(f"\n{CYAN}[3/7] Sync summary:{OFF}")
     logger.info(f"  {GREEN}↓ To download : {len(to_download_ids)} tracks{OFF}")
-    logger.info(f"  {RED}✕ To delete   : {len(to_delete_ids)} files{OFF}")
+    if delete_removed:
+        logger.info(f"  {RED}✕ To delete   : {len(actually_to_delete)} files{OFF}")
+        if protected_count:
+            logger.info(f"  {YELLOW}  Protected   : {protected_count} files (claimed elsewhere){OFF}")
+    else:
+        stale_count = len(raw_to_delete_ids)
+        logger.info(f"  {YELLOW}  Stale (kept)  : {stale_count} files (delete_removed=false){OFF}")
     logger.info(f"  Already synced: {len(already_synced)} tracks{OFF}")
 
-    if not to_download_ids and not to_delete_ids:
+    if not to_download_ids and not actually_to_delete:
         logger.info(f"\n{GREEN}Folder is already in sync with your favorites!{OFF}")
         # Still update M3U and sync stars
         _build_favorites_m3u(base_directory, remote_items)
-    else:
-        # Print details
-        if to_delete_ids:
-            logger.info(f"\n{RED}Files to DELETE (no longer favorited):{OFF}")
-            for tid in sorted(to_delete_ids):
-                logger.info(f"  {RED}✕ {os.path.basename(local_tracks[tid])}{OFF}")
+        if star_to_navidrome and (navidrome_url and navidrome_user and navidrome_password):
+            logger.info(f"\n{CYAN}[4/7] Syncing stars to Navidrome...{OFF}")
+            _sync_stars_to_navidrome(
+                nd_url=navidrome_url,
+                nd_user=navidrome_user,
+                nd_pass=navidrome_password,
+                remote_ids=remote_ids,
+                local_tracks=local_tracks,
+                base_directory=base_directory,
+                enable_sync=True,
+            )
+        logger.info(f"\n{GREEN}{'='*50}{OFF}")
+        logger.info(f"{GREEN}  FAVORITES SYNC COMPLETE{OFF}")
+        logger.info(f"{GREEN}{'='*50}{OFF}")
+        logger.info(f"  {GREEN}✓ Total now  : {len(remote_ids)} tracks{OFF}\n")
+        return
 
-        if to_download_ids:
-            logger.info(f"\n{GREEN}Tracks to DOWNLOAD (new favorites):{OFF}")
-            for tid in sorted(to_download_ids):
-                item = remote_ids[tid]
-                album_artist = item.get("album", {}).get("artist", {}).get("name")
-                performer_name = item.get("performer", {}).get("name", "Unknown")
-                artist = performer_name if album_artist in [None, "Various Artists"] else album_artist
-                title = item.get("title", "Unknown")
-                logger.info(f"  {GREEN}↓ {artist} — {title}{OFF}")
+    # Print details
+    if actually_to_delete:
+        logger.info(f"\n{RED}Files to DELETE (no longer favorited):{OFF}")
+        for tid in sorted(actually_to_delete):
+            logger.info(f"  {RED}✕ {os.path.basename(local_tracks[tid])}{OFF}")
+
+    if to_download_ids:
+        logger.info(f"\n{GREEN}Tracks to DOWNLOAD (new favorites):{OFF}")
+        for tid in sorted(to_download_ids):
+            item = remote_ids[tid]
+            album_artist = item.get("album", {}).get("artist", {}).get("name")
+            performer_name = item.get("performer", {}).get("name", "Unknown")
+            artist = performer_name if album_artist in [None, "Various Artists"] else album_artist
+            title = item.get("title", "Unknown")
+            logger.info(f"  {GREEN}↓ {artist} — {title}{OFF}")
 
     # --- Confirmation ---
-    if not auto_confirm and (to_download_ids or to_delete_ids):
+    if not auto_confirm and (to_download_ids or actually_to_delete):
         try:
             answer = input(f"\n{YELLOW}Proceed with favorites sync? [y/N]: {OFF}").strip().lower()
             if answer != 'y':
@@ -315,28 +388,38 @@ def sync_favorites(qobuz_dl, folder, auto_confirm=False,
             logger.info(f"\n{YELLOW}Sync cancelled.{OFF}")
             return
 
-    # --- 4. Execute sync ---
-    logger.info(f"\n{CYAN}[4/6] Executing sync...{OFF}")
+    # --- 5. Execute sync ---
+    logger.info(f"\n{CYAN}[4/7] Executing sync...{OFF}")
 
-    # 4a. Delete stale files (no longer in favorites)
+    # 5a. Delete stale files
     deleted_count = 0
-    for tid in to_delete_ids:
-        fpath = local_tracks[tid]
-        try:
-            os.remove(fpath)
-            deleted_count += 1
-            logger.info(f"  {RED}[-] Deleted: {os.path.basename(fpath)}{OFF}")
+    if actually_to_delete:
+        for tid in actually_to_delete:
+            fpath = local_tracks[tid]
+            try:
+                os.remove(fpath)
+                deleted_count += 1
+                logger.info(f"  {RED}[-] Deleted: {os.path.basename(fpath)}{OFF}")
 
-            lrc_path = os.path.splitext(fpath)[0] + ".lrc"
-            if os.path.isfile(lrc_path):
-                os.remove(lrc_path)
-                logger.info(f"  {RED}[-] Deleted: {os.path.basename(lrc_path)}{OFF}")
-        except OSError as e:
-            logger.error(f"  {RED}[!] Failed to delete {fpath}: {e}{OFF}")
+                lrc_path = os.path.splitext(fpath)[0] + ".lrc"
+                if os.path.isfile(lrc_path):
+                    os.remove(lrc_path)
+                    logger.info(f"  {RED}[-] Deleted: {os.path.basename(lrc_path)}{OFF}")
 
-    _clean_empty_dirs(base_directory, exclude_dirs={"_Playlists"})
+                # Remove from DB
+                if db_path:
+                    remove_source_entry(db_path, tid, source)
 
-    # 4b. Download missing tracks
+            except OSError as e:
+                logger.error(f"  {RED}[!] Failed to delete {fpath}: {e}{OFF}")
+
+        _clean_empty_dirs(base_directory, exclude_dirs={"_Playlists"})
+    elif not delete_removed:
+        stale_count = len(raw_to_delete_ids)
+        if stale_count > 0:
+            logger.info(f"  {YELLOW}[!] Keeping {stale_count} stale files (delete_removed=false){OFF}")
+
+    # 5b. Download missing tracks
     original_folder_format = qobuz_dl.folder_format
     original_track_format = qobuz_dl.track_format if hasattr(qobuz_dl, 'track_format') else None
     original_multi_disc = qobuz_dl.settings.multiple_disc_one_dir
@@ -360,6 +443,18 @@ def sync_favorites(qobuz_dl, folder, auto_confirm=False,
                 is_playlist=True,
                 playlist_index=playlist_idx,
             )
+
+            # Register in DB with source tracking
+            if db_path:
+                item = remote_ids[tid]
+                album_artist = item.get("album", {}).get("artist", {}).get("name", "")
+                album_title = item.get("album", {}).get("name", "")
+                handle_download_id(
+                    db_path=db_path, item_id=tid, add_id=True, media_type="track",
+                    source=source, sync_active=True,
+                    artist=album_artist, album=album_title,
+                )
+
             downloaded_count += 1
         except Exception as e:
             logger.error(f"  {RED}[!] Failed to download track {tid}: {e}{OFF}")
@@ -370,12 +465,12 @@ def sync_favorites(qobuz_dl, folder, auto_confirm=False,
         qobuz_dl.track_format = original_track_format
     qobuz_dl.settings.multiple_disc_one_dir = original_multi_disc
 
-    # --- 5. Generate M3U ---
-    logger.info(f"\n{CYAN}[5/6] Generating favorites M3U...{OFF}")
+    # --- 6. Generate M3U ---
+    logger.info(f"\n{CYAN}[5/7] Generating favorites M3U...{OFF}")
     _build_favorites_m3u(base_directory, remote_items)
 
-    # --- 6. Sync stars to Navidrome ---
-    logger.info(f"\n{CYAN}[6/6] Syncing stars to Navidrome...{OFF}")
+    # --- 7. Sync stars to Navidrome ---
+    logger.info(f"\n{CYAN}[6/7] Syncing stars to Navidrome...{OFF}")
     _sync_stars_to_navidrome(
         nd_url=navidrome_url,
         nd_user=navidrome_user,
@@ -392,6 +487,8 @@ def sync_favorites(qobuz_dl, folder, auto_confirm=False,
     logger.info(f"{GREEN}{'='*50}{OFF}")
     logger.info(f"  {GREEN}↓ Downloaded : {downloaded_count} tracks{OFF}")
     logger.info(f"  {RED}✕ Deleted    : {deleted_count} files{OFF}")
+    if protected_count:
+        logger.info(f"  {YELLOW}  Protected  : {protected_count} files{OFF}")
     logger.info(f"  {GREEN}✓ Total now  : {len(remote_ids)} tracks{OFF}\n")
 
 
@@ -415,19 +512,6 @@ def _sync_stars_to_navidrome(nd_url, nd_user, nd_pass, remote_ids,
                               local_tracks, base_directory, enable_sync=True):
     """
     Sync Qobuz favorites status to Navidrome star status.
-
-    For each track:
-    - If in Qobuz favorites AND found locally → star in Navidrome
-    - If NOT in Qobuz favorites AND previously starred → unstar in Navidrome
-
-    Args:
-        nd_url: Navidrome server URL
-        nd_user: Navidrome username
-        nd_pass: Navidrome password
-        remote_ids: Dict of {qobuz_track_id: qobuz_item} for favorited tracks
-        local_tracks: Dict of {qobuz_track_id: file_path} for local tracks
-        base_directory: Base download directory
-        enable_sync: Whether Navidrome sync is enabled
     """
     if not enable_sync or not nd_url or not nd_user or not nd_pass:
         logger.info(f"  {YELLOW}[!] Navidrome sync disabled (no URL/user/pass configured){OFF}")
@@ -440,7 +524,6 @@ def _sync_stars_to_navidrome(nd_url, nd_user, nd_pass, remote_ids,
         logger.error(f"  {RED}[-] Cannot reach Navidrome. Skipping star sync.{OFF}")
         return
 
-    # Get current starred tracks from Navidrome
     logger.info(f"  Fetching current starred tracks from Navidrome...")
     try:
         nd_starred = nd.get_starred_tracks()
@@ -448,8 +531,6 @@ def _sync_stars_to_navidrome(nd_url, nd_user, nd_pass, remote_ids,
         logger.error(f"  {RED}[-] Failed to fetch starred tracks: {e}{OFF}")
         return
 
-    # Build a lookup of currently starred tracks by title+artist (since we don't have qobuz IDs in ND)
-    # We'll match via search for each local track
     logger.info(f"  Found {len(nd_starred)} starred tracks in Navidrome.")
 
     starred_count = 0
@@ -457,12 +538,10 @@ def _sync_stars_to_navidrome(nd_url, nd_user, nd_pass, remote_ids,
     matched_count = 0
     not_found_count = 0
 
-    # Process tracks that ARE in favorites (should be starred)
     for qid, item in remote_ids.items():
         title = item.get("title", "")
         performer = item.get("performer", {}).get("name", "")
 
-        # Find local file for this track
         local_path = local_tracks.get(qid)
         local_tags = None
         if local_path:
@@ -473,7 +552,6 @@ def _sync_stars_to_navidrome(nd_url, nd_user, nd_pass, remote_ids,
 
         if nd_song_id:
             matched_count += 1
-            # Star it
             if nd.star_track(nd_song_id):
                 starred_count += 1
             else:
@@ -485,11 +563,6 @@ def _sync_stars_to_navidrome(nd_url, nd_user, nd_pass, remote_ids,
     logger.info(f"  {GREEN}  Matched {matched_count} tracks in Navidrome library{OFF}")
     if not_found_count:
         logger.info(f"  {YELLOW}  {not_found_count} tracks not found in Navidrome (not downloaded yet){OFF}")
-
-    # Now handle unstar: tracks that were starred but are NO LONGER in favorites
-    # We need to check ND starred tracks that are not in our Qobuz favorites
-    # This is trickier — we'd need to match ND starred tracks back to Qobuz IDs
-    # For now, skip unstar to avoid accidentally unstuffing user's stars
 
     if matched_count == 0 and not_found_count > 0:
         logger.info(f"  {YELLOW}[!] No matches found in Navidrome.{OFF}")

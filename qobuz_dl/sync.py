@@ -8,7 +8,7 @@ from qobuz_dl.color import GREEN, RED, YELLOW, CYAN, OFF
 
 logger = logging.getLogger(__name__)
 
-def sync_database(directory, db_path, client):
+def sync_database(directory, db_path, client, source='album'):
     """
     Scans the local directory and restores missing Qobuz IDs into the local DB.
     Uses embedded custom tags or falls back to Reverse Lookup via Qobuz API with anti-ban delay.
@@ -72,7 +72,8 @@ def sync_database(directory, db_path, client):
                 if track_id:
                     handle_download_id(
                         db_path=db_path, item_id=track_id, add_id=True, media_type="track",
-                        quality=quality, file_format=file_format, saved_path=file_path
+                        quality=quality, file_format=file_format, saved_path=file_path,
+                        source=source
                     )
                     added_tracks += 1
                 
@@ -80,7 +81,8 @@ def sync_database(directory, db_path, client):
                 if album_id and album_id not in added_albums:
                     handle_download_id(
                         db_path=db_path, item_id=album_id, add_id=True, media_type="album",
-                        quality=quality, file_format=file_format, saved_path=os.path.dirname(file_path)
+                        quality=quality, file_format=file_format, saved_path=os.path.dirname(file_path),
+                        source=source
                     )
                     added_albums.add(album_id)
 

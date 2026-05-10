@@ -93,26 +93,26 @@ class NavidromeClient:
     # ------------------------------------------------------------------ #
 
     @staticmethod
-    def _parse_song(song_elem):
+    def _parse_song(song_elem, ns=""):
         """Extract a flat dict from a <song> XML element."""
         track = {}
         for key in ["id", "title", "artist", "album", "albumId", "coverArt", "size"]:
-            el = song_elem.find(key)
+            el = song_elem.find(f"{ns}{key}")
             track[key] = el.text if el is not None and el.text else ""
 
         # Numeric duration
-        dur_el = song_elem.find("durationSec")
+        dur_el = song_elem.find(f"{ns}durationSec")
         track["duration"] = int(dur_el.text) if dur_el is not None and dur_el.text else 0
 
         # ISRC (often present)
-        isrc_el = song_elem.find("isrc")
+        isrc_el = song_elem.find(f"{ns}isrc")
         track["isrc"] = isrc_el.text if isrc_el is not None and isrc_el.text else ""
 
         return track
 
     def search_track(self, query, artist=None, limit=20):
         """
-        Search for tracks via getSearch3.
+        Search for tracks via search3 (Subsonic v1.16.1 / OpenSubsonic).
 
         Args:
             query: Search query (title, ISRC, or filename)
@@ -125,18 +125,21 @@ class NavidromeClient:
         if artist:
             query = f"{artist} {query}"
 
-        root = self._api_call("getSearch3", {"query": query, "limit": str(limit)})
+        # Use search3 endpoint (Navidrome 0.61.x uses search3, not getSearch3)
+        root = self._api_call("search3", {"query": query, "limit": str(limit)})
         if root is None:
             return []
 
-        container = root.find("searchResult3List")
-        if container is None:
-            container = root.find("searchResultList")  # fallback for older versions
+        # Navidrome XML uses namespace http://subsonic.org/restapi
+        ns = root.tag.split("}")[0].rstrip("{") if "}" in root.tag else ""
+        if ns:
+            ns = f"{{{ns}}}"
 
+        container = root.find(f"{ns}searchResult3")
         if container is None:
             return []
 
-        return [self._parse_song(s) for s in container.findall("song")]
+        return [self._parse_song(s, ns=ns) for s in container.findall(f"{ns}song")]
 
     # ------------------------------------------------------------------ #
     #  Star / Unstar
@@ -215,3 +218,51 @@ class NavidromeClient:
         if song is None:
             return None
         return self._parse_song(song)
+
+    # ------------------------------------------------------------------ #
+    #  Playlist lookup for a song
+    # ------------------------------------------------------------------ #
+
+    def get_playlists_for_song(self, song_id):
+        """
+        Get the list of playlists containing a given song.
+
+        Uses the native Navidrome API /api/song/{id} which returns
+        playlist associations. Falls back to Subsonic API if needed.
+
+        Returns list of playlist names, or empty list.
+        """
+        # Try native Navidrome API first
+        try:
+            import requests as req
+
+            # Get token via login
+            login_url = f"{self.server_url}/api/login"
+            login_resp = req.post(login_url, json={
+                "username": self.username,
+                "password": self.password,
+            }, timeout=10)
+
+            if login_resp.status_code != 200:
+                logger.debug(f"Native API login failed: {login_resp.status_code}")
+                return []
+
+            token = login_resp.json().get("token", "")
+            if not token:
+                return []
+
+            # Get song details including playlists
+            song_url = f"{self.server_url}/api/song/{song_id}"
+            resp = req.get(song_url, headers={"Authorization": f"Bearer {token}"}, timeout=10)
+
+            if resp.status_code != 200:
+                logger.debug(f"Native API getSong failed: {resp.status_code}")
+                return []
+
+            data = resp.json().get("data", {})
+            playlists = data.get("playlists", [])
+            return [pl.get("name", "Unknown") for pl in playlists]
+
+        except Exception as e:
+            logger.debug(f"Failed to get playlists for song {song_id}: {e}")
+            return []

@@ -2,6 +2,8 @@
 Bidirectional sync between a local folder and a Qobuz playlist.
 Uses a Yubal-inspired structure: artist/year - album/NN - track.
 Playlist M3U and cover files go into {directory}/_Playlists/.
+
+v3: Added source tracking via DB, delete_removed control, and safety checks.
 """
 
 import os
@@ -14,6 +16,8 @@ from mutagen.id3 import ID3
 from qobuz_dl.color import CYAN, GREEN, RED, YELLOW, OFF
 from qobuz_dl.constants import DEFAULT_PLAYLIST_FOLDER_FORMAT, DEFAULT_PLAYLIST_TRACK_FORMAT
 from qobuz_dl.utils import get_url_info
+from qobuz_dl.db import handle_download_id, count_active_sources, remove_source_entry
+from qobuz_dl.navidrome_api import NavidromeClient
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +173,33 @@ def _download_playlist_cover(base_directory, playlist_name, playlist_id, cover_u
         return None
 
 
-def sync_playlist(qobuz_dl, url, folder, auto_confirm=False, folder_format=None, track_format=None):
+def _check_can_delete(track_id, fpath, db_path, nd_client, qobuz_item, local_tags=None):
+    """
+    Check if a track can be safely deleted.
+
+    Returns (can_delete: bool, reason: str)
+    """
+    # 1. Check DB for other active sources
+    if db_path:
+        active_count = count_active_sources(db_path, track_id)
+        if active_count > 1:
+            return False, f"DB: {active_count} active sources claim this track"
+
+    # 2. Check Navidrome for other playlists
+    if nd_client and qobuz_item:
+        from qobuz_dl.sync_favorites import _find_navidrome_track as find_nd_track
+        nd_song_id = find_nd_track(nd_client, qobuz_item, local_tags)
+        if nd_song_id:
+            playlists = nd_client.get_playlists_for_song(nd_song_id)
+            if playlists:
+                return False, f"Navidrome: track in {len(playlists)} playlist(s): {', '.join(playlists[:3])}"
+
+    return True, ""
+
+
+def sync_playlist(qobuz_dl, url, folder, auto_confirm=False, folder_format=None, track_format=None,
+                  db_path=None, delete_removed=False,
+                  navidrome_url=None, navidrome_user=None, navidrome_password=None):
     """
     Main entry point for playlist sync.
 
@@ -192,6 +222,11 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False, folder_format=None,
         auto_confirm: Skip confirmation prompt
         folder_format: Override folder format (Yubal-inspired)
         track_format: Override track format (Yubal-inspired)
+        db_path: Path to SQLite DB for source tracking (optional)
+        delete_removed: Delete tracks no longer in playlist (default: False)
+        navidrome_url: Navidrome server URL for safety checks
+        navidrome_user: Navidrome username
+        navidrome_password: Navidrome password
     """
     from qobuz_dl.utils import make_m3u_playlist
 
@@ -217,7 +252,7 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False, folder_format=None,
     logger.info(f"{YELLOW}URL : {url}{OFF}")
 
     # --- 2. Fetch remote playlist ---
-    logger.info(f"{CYAN}[1/5] Fetching playlist from Qobuz...{OFF}")
+    logger.info(f"{CYAN}[1/6] Fetching playlist from Qobuz...{OFF}")
     playlist_name, remote_items, cover_url = _fetch_remote_tracks(qobuz_dl.client, playlist_id)
     remote_ids = {str(item["id"]): item for item in remote_items}
     logger.info(f"{CYAN}      Found {len(remote_ids)} tracks in the Qobuz playlist.{OFF}")
@@ -234,11 +269,28 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False, folder_format=None,
     # Playlist filename suffix (like Yubal)
     safe_playlist_name = _sanitize_filename(playlist_name)
     id_suffix = playlist_id[-8:] if len(playlist_id) > 8 else playlist_id
+    source = f"playlist:{playlist_name}"
     logger.info(f"{YELLOW}PL  : {safe_playlist_name} [{id_suffix}]{OFF}")
-    logger.info(f"{YELLOW}DIR : {base_directory}{OFF}\n")
+    logger.info(f"{YELLOW}DIR : {base_directory}{OFF}")
+    logger.info(f"{YELLOW}SRC : {source}{OFF}")
+    if delete_removed:
+        logger.info(f"{YELLOW}DEL : enabled{OFF}")
+    else:
+        logger.info(f"{YELLOW}DEL : disabled (stale files kept){OFF}")
+    logger.info("")
+
+    # --- Initialize Navidrome client for safety checks ---
+    nd_client = None
+    if navidrome_url and navidrome_user and navidrome_password:
+        try:
+            nd_client = NavidromeClient(navidrome_url, navidrome_user, navidrome_password)
+            if nd_client.test_connection():
+                logger.info(f"{CYAN}      Navidrome connected for safety checks.{OFF}")
+        except Exception as e:
+            logger.debug(f"Navidrome connection failed: {e}")
 
     # --- 3. Scan local tracks across ENTIRE base directory ---
-    logger.info(f"{CYAN}[2/5] Scanning local folder...{OFF}")
+    logger.info(f"\n{CYAN}[2/6] Scanning local folder...{OFF}")
     local_tracks, untagged = _scan_local_tracks(base_directory)
     logger.info(f"{CYAN}      Found {len(local_tracks)} tagged tracks locally.{OFF}")
     if untagged:
@@ -251,15 +303,60 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False, folder_format=None,
     remote_id_set = set(remote_ids.keys())
 
     to_download_ids = remote_id_set - local_id_set
-    to_delete_ids = local_id_set - remote_id_set
+    raw_to_delete_ids = local_id_set - remote_id_set
     already_synced = local_id_set & remote_id_set
 
-    logger.info(f"\n{CYAN}[3/5] Sync summary:{OFF}")
-    logger.info(f"  {GREEN}↓ To download : {len(to_download_ids)} tracks{OFF}")
-    logger.info(f"  {RED}✕ To delete   : {len(to_delete_ids)} files{OFF}")
-    logger.info(f"    Already synced: {len(already_synced)} tracks")
+    # --- 5. Safety check for deletions ---
+    actually_to_delete = set()
+    protected_count = 0
 
-    if not to_download_ids and not to_delete_ids:
+    if delete_removed and raw_to_delete_ids:
+        from mutagen.flac import FLAC as FLACFmt
+        from mutagen.id3 import ID3 as ID3Fmt
+
+        for tid in raw_to_delete_ids:
+            fpath = local_tracks[tid]
+            local_tags = None
+            try:
+                if fpath.lower().endswith('.flac'):
+                    audio = FLACFmt(fpath)
+                    local_tags = {
+                        'isrc': audio.get("ISRC", [None])[0] or '',
+                        'title': audio.get("TITLE", [None])[0] or '',
+                        'artist': audio.get("ARTIST", [None])[0] or '',
+                    }
+                elif fpath.lower().endswith('.mp3'):
+                    audio = ID3Fmt(fpath)
+                    local_tags = {
+                        'isrc': str(audio.get("TSRC", {}).text[0]) if audio.get("TSRC") else '',
+                        'title': '',
+                        'artist': '',
+                    }
+            except Exception:
+                pass
+
+            can_del, reason = _check_can_delete(tid, fpath, db_path, nd_client, None, local_tags)
+            if can_del:
+                actually_to_delete.add(tid)
+            else:
+                protected_count += 1
+                logger.info(f"  {YELLOW}[!] Protected: {os.path.basename(fpath)} ({reason}){OFF}")
+    elif not delete_removed:
+        actually_to_delete = set()
+        protected_count = len(raw_to_delete_ids)
+
+    logger.info(f"\n{CYAN}[3/6] Sync summary:{OFF}")
+    logger.info(f"  {GREEN}↓ To download : {len(to_download_ids)} tracks{OFF}")
+    if delete_removed:
+        logger.info(f"  {RED}✕ To delete   : {len(actually_to_delete)} files{OFF}")
+        if protected_count:
+            logger.info(f"  {YELLOW}  Protected   : {protected_count} files (claimed elsewhere){OFF}")
+    else:
+        stale_count = len(raw_to_delete_ids)
+        logger.info(f"  {YELLOW}  Stale (kept)  : {stale_count} files (delete_removed=false){OFF}")
+    logger.info(f"  Already synced: {len(already_synced)} tracks{OFF}")
+
+    if not to_download_ids and not actually_to_delete:
         logger.info(f"\n{GREEN}✓ Folder is already in sync with the playlist!{OFF}")
 
         # Update M3U anyway (order may have changed)
@@ -267,9 +364,9 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False, folder_format=None,
         return
 
     # Print file-level details
-    if to_delete_ids:
+    if actually_to_delete:
         logger.info(f"\n{RED}Files to DELETE:{OFF}")
-        for tid in sorted(to_delete_ids):
+        for tid in sorted(actually_to_delete):
             logger.info(f"  {RED}✕ {os.path.basename(local_tracks[tid])}{OFF}")
 
     if to_download_ids:
@@ -293,12 +390,12 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False, folder_format=None,
             logger.info(f"\n{YELLOW}Sync cancelled.{OFF}")
             return
 
-    # --- 5. Execute sync ---
-    logger.info(f"\n{CYAN}[4/5] Executing sync...{OFF}")
+    # --- 6. Execute sync ---
+    logger.info(f"\n{CYAN}[4/6] Executing sync...{OFF}")
 
-    # 5a. Delete stale files
+    # 6a. Delete stale files (only if delete_removed=True and safety checks pass)
     deleted_count = 0
-    for tid in to_delete_ids:
+    for tid in actually_to_delete:
         fpath = local_tracks[tid]
         try:
             os.remove(fpath)
@@ -309,13 +406,18 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False, folder_format=None,
             if os.path.isfile(lrc_path):
                 os.remove(lrc_path)
                 logger.info(f"  {RED}[-] Deleted: {os.path.basename(lrc_path)}{OFF}")
+
+            # Remove from DB
+            if db_path:
+                remove_source_entry(db_path, tid, source)
+
         except OSError as e:
             logger.error(f"  {RED}[!] Failed to delete {fpath}: {e}{OFF}")
 
     # Clean up empty directories after deletion
     _clean_empty_dirs(base_directory, exclude_dirs={"_Playlists"})
 
-    # 5b. Download missing tracks using Yubal-inspired folder structure
+    # 6b. Download missing tracks using Yubal-inspired folder structure
     original_folder_format = qobuz_dl.folder_format
     original_track_format = qobuz_dl.track_format if hasattr(qobuz_dl, 'track_format') else None
     original_multi_disc = qobuz_dl.settings.multiple_disc_one_dir
@@ -340,6 +442,18 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False, folder_format=None,
                 is_playlist=True,
                 playlist_index=playlist_idx,
             )
+
+            # Register in DB with source tracking
+            if db_path:
+                item = remote_ids[tid]
+                album_artist = item.get("album", {}).get("artist", {}).get("name", "")
+                album_title = item.get("album", {}).get("name", "")
+                handle_download_id(
+                    db_path=db_path, item_id=tid, add_id=True, media_type="track",
+                    source=source, sync_active=True,
+                    artist=album_artist, album=album_title,
+                )
+
             downloaded_count += 1
         except Exception as e:
             logger.error(f"  {RED}[!] Failed to download track {tid}: {e}{OFF}")
@@ -350,8 +464,8 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False, folder_format=None,
         qobuz_dl.track_format = original_track_format
     qobuz_dl.settings.multiple_disc_one_dir = original_multi_disc
 
-    # --- 6. Generate artifacts ---
-    logger.info(f"\n{CYAN}[5/5] Generating playlist artifacts...{OFF}")
+    # --- 7. Generate artifacts ---
+    logger.info(f"\n{CYAN}[5/6] Generating playlist artifacts...{OFF}")
 
     # M3U
     _build_m3u(base_directory, playlist_name, playlist_id, remote_items)
@@ -360,10 +474,19 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False, folder_format=None,
     if cover_url:
         _download_playlist_cover(base_directory, playlist_name, playlist_id, cover_url)
 
+    # --- 8. Update DB for removed tracks (mark source as inactive) ---
+    if db_path and raw_to_delete_ids:
+        for tid in raw_to_delete_ids:
+            if tid not in actually_to_delete:
+                # Track was protected - remove this playlist source but keep others
+                remove_source_entry(db_path, tid, source)
+
     # --- Final summary ---
     logger.info(f"\n{GREEN}━━━ SYNC COMPLETE ━━━{OFF}")
     logger.info(f"  {GREEN}↓ Downloaded : {downloaded_count} tracks{OFF}")
     logger.info(f"  {RED}✕ Deleted    : {deleted_count} files{OFF}")
+    if protected_count:
+        logger.info(f"  {YELLOW}  Protected  : {protected_count} files{OFF}")
     logger.info(f"  {GREEN}✓ Total now  : {len(remote_ids)} tracks{OFF}\n")
 
 

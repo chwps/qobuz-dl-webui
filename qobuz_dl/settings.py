@@ -69,6 +69,9 @@ class QobuzDLSettings:
         self.playlist_track_format = kwargs.get(
             'playlist_track_format', DEFAULT_PLAYLIST_TRACK_FORMAT
         )
+        self.playlist_delete_removed = kwargs.get(
+            'playlist_delete_removed', False
+        )
 
         # user_auth_token
         self.user_auth_token = kwargs.get('user_auth_token', '')
@@ -79,6 +82,9 @@ class QobuzDLSettings:
         )
         self.favorites_track_format = kwargs.get(
             'favorites_track_format', DEFAULT_FAVORITES_TRACK_FORMAT
+        )
+        self.favorites_delete_removed = kwargs.get(
+            'favorites_delete_removed', False
         )
 
         # Navidrome connection for favorites star sync
@@ -159,6 +165,7 @@ class QobuzDLSettings:
             'playlist_track_format': config.get(
                 section, "playlist_track_format", fallback=DEFAULT_PLAYLIST_TRACK_FORMAT
             ),
+            'playlist_delete_removed': config.getboolean(section, "playlist_delete_removed", fallback=False),
 
             # user_auth_token
             'user_auth_token': config.get(section, "user_auth_token", fallback=""),
@@ -175,6 +182,9 @@ class QobuzDLSettings:
             'navidrome_url': config.get(section, "navidrome_url", fallback=""),
             'navidrome_user': config.get(section, "navidrome_user", fallback=""),
             'navidrome_password': config.get(section, "navidrome_password", fallback=""),
+
+            # Favorites sync delete removed
+            'favorites_delete_removed': config.getboolean(section, "favorites_delete_removed", fallback=False),
 
             'lrc_files': getattr(arguments, 'lrc_files', config.getboolean(section, "lrc_files", fallback=True)),
         }

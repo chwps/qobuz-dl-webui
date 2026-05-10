@@ -250,6 +250,11 @@ def _handle_commands(qobuz, arguments):
                 auto_confirm=arguments.yes,
                 folder_format=qobuz.settings.playlist_folder_format,
                 track_format=qobuz.settings.playlist_track_format,
+                db_path=qobuz.downloads_db,
+                delete_removed=qobuz.settings.playlist_delete_removed,
+                navidrome_url=qobuz.settings.navidrome_url,
+                navidrome_user=qobuz.settings.navidrome_user,
+                navidrome_password=qobuz.settings.navidrome_password,
             )
         elif arguments.command in ("sync-favorites", "sf"):
             from qobuz_dl.sync_favorites import sync_favorites
@@ -263,6 +268,8 @@ def _handle_commands(qobuz, arguments):
                 navidrome_user=qobuz.settings.navidrome_user,
                 navidrome_password=qobuz.settings.navidrome_password,
                 star_to_navidrome=not getattr(arguments, 'no_navidrome', False),
+                delete_removed=qobuz.settings.favorites_delete_removed,
+                db_path=qobuz.downloads_db,
             )
         elif arguments.command == "lucky":
             query = " ".join(arguments.QUERY)
@@ -393,6 +400,20 @@ def _run_sync_watch():
     if env_favorites_track:
         settings.favorites_track_format = env_favorites_track
 
+    # Allow env var override for favorites delete removed
+    env_favorites_delete = os.environ.get("SYNC_FAVORITES_DELETE_REMOVED", "").strip().lower()
+    if env_favorites_delete in ("true", "1", "yes"):
+        settings.favorites_delete_removed = True
+    elif env_favorites_delete in ("false", "0", "no"):
+        settings.favorites_delete_removed = False
+
+    # Allow env var override for playlist delete removed
+    env_playlist_delete = os.environ.get("SYNC_PLAYLIST_DELETE_REMOVED", "").strip().lower()
+    if env_playlist_delete in ("true", "1", "yes"):
+        settings.playlist_delete_removed = True
+    elif env_playlist_delete in ("false", "0", "no"):
+        settings.playlist_delete_removed = False
+
     # Override Navidrome settings from env vars (Docker)
     if navidrome_url:
         settings.navidrome_url = navidrome_url
@@ -446,6 +467,11 @@ def _run_sync_watch():
                     auto_confirm=auto_yes,
                     folder_format=settings.playlist_folder_format,
                     track_format=settings.playlist_track_format,
+                    db_path=QOBUZ_DB,
+                    delete_removed=settings.playlist_delete_removed,
+                    navidrome_url=settings.navidrome_url,
+                    navidrome_user=settings.navidrome_user,
+                    navidrome_password=settings.navidrome_password,
                 )
                 logging.info(f"{GREEN}  [{idx}/{len(playlists)}] Done.{OFF}")
             except Exception as e:
@@ -466,6 +492,8 @@ def _run_sync_watch():
                     navidrome_user=settings.navidrome_user,
                     navidrome_password=settings.navidrome_password,
                     star_to_navidrome=bool(settings.navidrome_url),
+                    delete_removed=settings.favorites_delete_removed,
+                    db_path=QOBUZ_DB,
                 )
                 logging.info(f"{MAGENTA}[Sync Watch] Favorites synced.{OFF}")
             except Exception as e:
@@ -506,10 +534,9 @@ def main():
     # --- NEW: STATS COMMAND INTEGRATION ---
     if len(sys.argv) > 1 and sys.argv[1] == "stats":
         from qobuz_dl.db import get_stats
-        
-        # QOBUZ_DB è già definito all'inizio di cli.py, lo usiamo direttamente
+
         artists = get_stats(QOBUZ_DB)
-        
+
         print(f"\n{CYAN}--- QOBUZ-DL ULTIMATE STATISTICS ---{OFF}")
         if not artists:
             print(f"{YELLOW}No artist data found yet. Start downloading to populate your stats!{OFF}")
@@ -518,8 +545,153 @@ def main():
             for artist in artists:
                 print(f" - {artist}")
         print(f"{CYAN}-------------------------------------{OFF}\n")
-        sys.exit(0) # Esce immediatamente dopo aver stampato le statistiche
+        sys.exit(0)
     # -------------------------------------------------
+
+    # --- NEW: LIST-STALE COMMAND ---
+    if len(sys.argv) > 1 and sys.argv[1] in ("list-stale", "ls"):
+        from qobuz_dl.db import get_stale_entries, count_active_sources
+
+        stale_entries = get_stale_entries(QOBUZ_DB)
+
+        print(f"\n{CYAN}{'='*70}{OFF}")
+        print(f"{CYAN}  STALE ENTRIES (sync_active=0){OFF}")
+        print(f"{CYAN}{'='*70}{OFF}\n")
+
+        if not stale_entries:
+            print(f"{GREEN}No stale entries found. All syncs are active.{OFF}\n")
+        else:
+            print(f"Found {len(stale_entries)} stale entry/entries:\n")
+            for entry in stale_entries:
+                active_count = count_active_sources(QOBUZ_DB, entry['id'])
+                other = "YES" if active_count > 0 else "NO"
+                print(f"  {YELLOW}[!] {entry['id']}{OFF}")
+                print(f"      Source  : {entry['source']}")
+                print(f"      Artist  : {entry['artist'] or 'N/A'}")
+                print(f"      Album   : {entry['album'] or 'N/A'}")
+                print(f"      File    : {entry['saved_path'] or 'N/A'}")
+                print(f"      Other active source : {other}")
+                print()
+        print(f"{CYAN}{'='*70}{OFF}\n")
+        sys.exit(0)
+    # ----------------------------------
+
+    # --- NEW: PURGE COMMAND ---
+    if len(sys.argv) > 1 and sys.argv[1] == "purge":
+        from qobuz_dl.db import get_stale_entries, count_active_sources, delete_stale_with_ids
+
+        stale_entries = get_stale_entries(QOBUZ_DB)
+
+        # Filter to only those with no other active source
+        eligible = []
+        for entry in stale_entries:
+            active_count = count_active_sources(QOBUZ_DB, entry['id'])
+            if active_count == 0:
+                eligible.append(entry)
+
+        if not eligible:
+            print(f"\n{GREEN}No entries to purge. All stale entries have other active sources.{OFF}\n")
+            sys.exit(0)
+
+        dry_run = "--dry-run" in sys.argv
+        delete_files = "--delete-files" in sys.argv
+
+        print(f"\n{CYAN}{'='*70}{OFF}")
+        print(f"{CYAN}  PURGE STALE ENTRIES{OFF}")
+        print(f"{CYAN}{'='*70}{OFF}\n")
+        print(f"Found {len(eligible)} stale entry/entries with NO other active source.\n")
+
+        for entry in eligible:
+            print(f"  {RED}[!] {entry['id']}{OFF}")
+            print(f"      Source  : {entry['source']}")
+            print(f"      Artist  : {entry['artist'] or 'N/A'}")
+            print(f"      Album   : {entry['album'] or 'N/A'}")
+            print(f"      File    : {entry['saved_path'] or 'N/A'}")
+            if delete_files and entry['saved_path']:
+                print(f"      -> Would delete file")
+            print()
+
+        if dry_run:
+            print(f"{YELLOW}--- DRY RUN: No changes made ---{OFF}\n")
+            sys.exit(0)
+
+        # Confirmation
+        try:
+            action = "delete DB entries" if not delete_files else "delete DB entries AND files"
+            answer = input(f"{YELLOW}Purge these entries ({action})? [y/N]: {OFF}").strip().lower()
+            if answer != 'y':
+                print(f"\n{YELLOW}Purge cancelled.{OFF}\n")
+                sys.exit(0)
+        except (KeyboardInterrupt, EOFError):
+            print(f"\n{YELLOW}Purge cancelled.{OFF}\n")
+            sys.exit(0)
+
+        # Execute purge
+        deleted_ids = delete_stale_with_ids(QOBUZ_DB)
+        print(f"\n{GREEN}Purged {len(deleted_ids)} entries from database.{OFF}")
+
+        if delete_files:
+            deleted_files = 0
+            for entry in eligible:
+                fpath = entry.get('saved_path', '')
+                if fpath and os.path.isfile(fpath):
+                    try:
+                        os.remove(fpath)
+                        deleted_files += 1
+                        print(f"  {RED}[-] Deleted file: {os.path.basename(fpath)}{OFF}")
+                        # Also delete .lrc if exists
+                        lrc_path = os.path.splitext(fpath)[0] + ".lrc"
+                        if os.path.isfile(lrc_path):
+                            os.remove(lrc_path)
+                            print(f"  {RED}[-] Deleted lyrics: {os.path.basename(lrc_path)}{OFF}")
+                    except OSError as e:
+                        print(f"  {RED}[!] Failed to delete {fpath}: {e}{OFF}")
+            print(f"\n{GREEN}Deleted {deleted_files} files from disk.{OFF}")
+
+        print(f"\n{GREEN}Purge complete.{OFF}\n")
+        sys.exit(0)
+    # ----------------------------------
+
+    # --- NEW: MARK-STOPPED COMMAND ---
+    if len(sys.argv) > 1 and sys.argv[1] in ("mark-stopped", "ms"):
+        from qobuz_dl.db import mark_source_inactive
+
+        # Get playlist name from arguments
+        args = sys.argv[2:]
+        playlist_name = None
+        if "--playlists" in args or "-p" in args:
+            # Handle if someone passes it as a flag
+            pass
+
+        # Find the playlist name in remaining args
+        for arg in args:
+            if not arg.startswith("-"):
+                playlist_name = arg
+                break
+
+        if not playlist_name:
+            print(f"\n{RED}Error: Please specify a playlist name.{OFF}")
+            print(f"Usage: qobuz-dl mark-stopped \"Playlist Name\"\n")
+            sys.exit(1)
+
+        source = f"playlist:{playlist_name}"
+        count = mark_source_inactive(QOBUZ_DB, source)
+
+        print(f"\n{CYAN}{'='*50}{OFF}")
+        print(f"{CYAN}  MARK SYNC AS STOPPED{OFF}")
+        print(f"{CYAN}{'='*50}{OFF}\n")
+        print(f"  Source  : {source}")
+        print(f"  Updated : {count} entries marked as sync_active=0\n")
+
+        if count == 0:
+            print(f"{YELLOW}No entries found for this source.{OFF}")
+            print(f"  Make sure the playlist name matches exactly.{OFF}")
+        else:
+            print(f"{GREEN}Done. These tracks are now protected from deletion by other syncs.{OFF}")
+
+        print(f"\n{CYAN}{'='*50}{OFF}\n")
+        sys.exit(0)
+    # ----------------------------------
 
     config = configparser.ConfigParser(interpolation=None)
     config.read(CONFIG_FILE)

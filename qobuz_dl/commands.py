@@ -137,6 +137,52 @@ def sync_watch_args(subparsers):
     )
     return sync_watch
 
+
+def list_stale_args(subparsers):
+    list_stale = subparsers.add_parser(
+        "list-stale",
+        aliases=["ls"],
+        description="List database entries where sync has been stopped (sync_active=0). "
+                    "Shows track info, source, and whether other active sources exist.",
+        help="list stale database entries (stopped syncs)",
+    )
+    return list_stale
+
+
+def purge_args(subparsers):
+    purge = subparsers.add_parser(
+        "purge",
+        description="Purge database entries where sync has been stopped AND no other active source exists. "
+                    "Optionally delete the associated files from disk.",
+        help="purge stale database entries and optionally delete files",
+    )
+    purge.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be purged without actually doing it",
+    )
+    purge.add_argument(
+        "--delete-files",
+        action="store_true",
+        help="Also delete the associated files from disk (use with caution!)",
+    )
+    return purge
+
+
+def mark_stopped_args(subparsers):
+    mark_stopped = subparsers.add_parser(
+        "mark-stopped",
+        aliases=["ms"],
+        description="Mark a playlist source as stopped (sync_active=0). "
+                    "This protects tracks from being deleted by other syncs.",
+        help="mark a playlist sync as stopped",
+    )
+    mark_stopped.add_argument(
+        "PLAYLIST_NAME",
+        help="Name of the playlist to mark as stopped (e.g. 'My Playlist')",
+    )
+    return mark_stopped
+
 def add_common_arg(custom_parser, default_folder, default_quality):
     custom_parser.add_argument(
         "-d",
@@ -460,10 +506,14 @@ def qobuz_dl_args(
     sync_pl_cmd = sync_playlist_args(subparsers)
     sync_fav_cmd = sync_favorites_args(subparsers)
     sync_watch_cmd = sync_watch_args(subparsers)
+    list_stale_cmd = list_stale_args(subparsers)
+    purge_cmd = purge_args(subparsers)
+    mark_stopped_cmd = mark_stopped_args(subparsers)
 
     [
         add_common_arg(i, default_folder, default_quality)
-        for i in (interactive, download, lucky, sync_pl_cmd, sync_fav_cmd, sync_watch_cmd)
+        for i in (interactive, download, lucky, sync_pl_cmd, sync_fav_cmd, sync_watch_cmd,
+                  list_stale_cmd, purge_cmd, mark_stopped_cmd)
     ]
 
     return parser
