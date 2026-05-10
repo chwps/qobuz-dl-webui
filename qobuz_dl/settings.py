@@ -1,4 +1,7 @@
-from qobuz_dl.constants import DEFAULT_FOLDER, DEFAULT_TRACK, DEFAULT_MULTIPLE_DISC_TRACK
+from qobuz_dl.constants import (
+    DEFAULT_FOLDER, DEFAULT_TRACK, DEFAULT_MULTIPLE_DISC_TRACK,
+    DEFAULT_PLAYLIST_FOLDER_FORMAT, DEFAULT_PLAYLIST_TRACK_FORMAT,
+)
 
 class QobuzDLSettings:
     def __init__(self, **kwargs):
@@ -57,6 +60,14 @@ class QobuzDLSettings:
 
         # Add parallel download thread count option
         self.max_workers = int(kwargs.get('max_workers', 3))
+
+        # Playlist sync format overrides (Yubal-inspired structure)
+        self.playlist_folder_format = kwargs.get(
+            'playlist_folder_format', DEFAULT_PLAYLIST_FOLDER_FORMAT
+        )
+        self.playlist_track_format = kwargs.get(
+            'playlist_track_format', DEFAULT_PLAYLIST_TRACK_FORMAT
+        )
 
         # user_auth_token
         self.user_auth_token = kwargs.get('user_auth_token', '')
@@ -126,6 +137,14 @@ class QobuzDLSettings:
             
             # Add parallel download thread count configuration
             'max_workers': arguments.max_workers or config.get(section, "max_workers", fallback="3"),
+
+            # Playlist sync format configuration (Yubal-inspired structure)
+            'playlist_folder_format': config.get(
+                section, "playlist_folder_format", fallback=DEFAULT_PLAYLIST_FOLDER_FORMAT
+            ),
+            'playlist_track_format': config.get(
+                section, "playlist_track_format", fallback=DEFAULT_PLAYLIST_TRACK_FORMAT
+            ),
 
             # user_auth_token
             'user_auth_token': config.get(section, "user_auth_token", fallback=""),

@@ -12,13 +12,10 @@ from mutagen.flac import FLAC
 from mutagen.id3 import ID3
 
 from qobuz_dl.color import CYAN, GREEN, RED, YELLOW, OFF
+from qobuz_dl.constants import DEFAULT_PLAYLIST_FOLDER_FORMAT, DEFAULT_PLAYLIST_TRACK_FORMAT
 from qobuz_dl.utils import get_url_info
 
 logger = logging.getLogger(__name__)
-
-# Yubal-inspired defaults
-DEFAULT_PLAYLIST_FOLDER_FORMAT = "{album_artist}/{year} - {album_title}"
-DEFAULT_PLAYLIST_TRACK_FORMAT = "{track_number:02d} - {track_title}"
 
 
 def _scan_local_tracks(base_directory, exclude_dirs=None):
@@ -87,10 +84,33 @@ def _fetch_remote_tracks(client, playlist_id):
 
 def _sanitize_filename(name):
     """Remove invalid characters for OS filenames and paths."""
-    invalid_chars = '<>:"/\\|?*'
+    invalid_chars = '<>:"/\\|*?'
     for char in invalid_chars:
         name = name.replace(char, '_')
     return name.strip()
+
+
+def _clean_empty_dirs(base_directory, exclude_dirs=None):
+    """
+    Remove empty directories after file deletion.
+    Walk bottom-up to remove nested empty dirs.
+    Excludes _Playlists/ and any dirs in exclude_dirs.
+    """
+    exclude = set(exclude_dirs or [])
+    exclude.add("_Playlists")
+
+    for root, dirs, files in os.walk(base_directory, topdown=False):
+        for d in dirs:
+            dir_path = os.path.join(root, d)
+            try:
+                if d in exclude:
+                    continue
+                if not os.listdir(dir_path):
+                    os.rmdir(dir_path)
+                    rel = os.path.relpath(dir_path, base_directory)
+                    logger.info(f"  {RED}[-] Removed empty dir: {rel}{OFF}")
+            except OSError:
+                pass
 
 
 def _format_path(pattern, context, base_dir):
@@ -149,7 +169,7 @@ def _download_playlist_cover(base_directory, playlist_name, playlist_id, cover_u
         return None
 
 
-def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
+def sync_playlist(qobuz_dl, url, folder, auto_confirm=False, folder_format=None, track_format=None):
     """
     Main entry point for playlist sync.
 
@@ -164,8 +184,20 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
         |-- Artist2/
         |     |-- 2019 - Album2/
         |           |-- 01 - Track1.flac
+
+    Args:
+        qobuz_dl: The QobuzDL instance
+        url: Qobuz playlist URL
+        folder: Base download directory
+        auto_confirm: Skip confirmation prompt
+        folder_format: Override folder format (Yubal-inspired)
+        track_format: Override track format (Yubal-inspired)
     """
     from qobuz_dl.utils import make_m3u_playlist
+
+    # Use provided formats or fallback to defaults
+    pl_folder_format = folder_format or DEFAULT_PLAYLIST_FOLDER_FORMAT
+    pl_track_format = track_format or DEFAULT_PLAYLIST_TRACK_FORMAT
 
     # --- 1. Parse and validate URL ---
     try:
@@ -280,13 +312,16 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
         except OSError as e:
             logger.error(f"  {RED}[!] Failed to delete {fpath}: {e}{OFF}")
 
+    # Clean up empty directories after deletion
+    _clean_empty_dirs(base_directory, exclude_dirs={"_Playlists"})
+
     # 5b. Download missing tracks using Yubal-inspired folder structure
     original_folder_format = qobuz_dl.folder_format
     original_track_format = qobuz_dl.track_format if hasattr(qobuz_dl, 'track_format') else None
     original_multi_disc = qobuz_dl.settings.multiple_disc_one_dir
 
-    qobuz_dl.folder_format = DEFAULT_PLAYLIST_FOLDER_FORMAT
-    qobuz_dl.track_format = DEFAULT_PLAYLIST_TRACK_FORMAT
+    qobuz_dl.folder_format = pl_folder_format
+    qobuz_dl.track_format = pl_track_format
     qobuz_dl.settings.multiple_disc_one_dir = True
 
     # Build position map for track numbering

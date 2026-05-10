@@ -148,7 +148,7 @@ def _reset_config(config_file):
     config["qobuz"]["secrets"] = ",".join(bundle.get_secrets().values())
 
     # Removed old folder_format override that caused custom format resets
-    config["qobuz"]["track_format"] = "{track_number} - {track_title}"
+    config["qobuz"]["track_format"] = "{track_number:02d} - {track_title}"
     config["qobuz"]["fallback_folder_format"] = "{artist} - {album}"
     config["qobuz"]["smart_discography"] = "false"
 
@@ -179,10 +179,20 @@ def _reset_config(config_file):
     
     config["qobuz"]["multiple_disc_prefix"] = "CD"
     config["qobuz"]["multiple_disc_one_dir"] = "false"
-    config["qobuz"]["multiple_disc_track_format"] = "{disc_number}.{track_number} - {track_title}"
+    config["qobuz"]["multiple_disc_track_format"] = "{disc_number:02d}.{track_number:02d} - {track_title}"
     
     config["qobuz"]["max_workers"] = "3"
     config["qobuz"]["user_auth_token"] = ""
+
+    # Playlist sync format configuration
+    config["qobuz"]["playlist_folder_format"] = (
+        input(f"Playlist folder format (press Enter for '{{album_artist}}/{{year}} - {{album_title}}')\n- ")
+        or "{album_artist}/{year} - {album_title}"
+    )
+    config["qobuz"]["playlist_track_format"] = (
+        input(f"Playlist track format (press Enter for '{{track_number:02d}} - {{track_title}}')\n- ")
+        or "{track_number:02d} - {track_title}"
+    )
     
     with open(config_file, "w") as configfile:
         config.write(configfile)
@@ -219,8 +229,10 @@ def _handle_commands(qobuz, arguments):
             sync_playlist(
                 qobuz,
                 arguments.URL,
-                qobuz.directory,  # <-- MODIFIED: Previously it was arguments.FOLDER
+                qobuz.directory,
                 auto_confirm=arguments.yes,
+                folder_format=qobuz.settings.playlist_folder_format,
+                track_format=qobuz.settings.playlist_track_format,
             )
         elif arguments.command == "lucky":
             query = " ".join(arguments.QUERY)
@@ -330,6 +342,17 @@ def _run_sync_watch():
 
     settings = QobuzDLSettings.from_arguments_configparser(arguments, config)
 
+    # Allow env var overrides for playlist formats
+    env_playlist_folder = os.environ.get("SYNC_PLAYLIST_FOLDER_FORMAT", "").strip()
+    env_playlist_track = os.environ.get("SYNC_PLAYLIST_TRACK_FORMAT", "").strip()
+    if env_playlist_folder:
+        settings.playlist_folder_format = env_playlist_folder
+    if env_playlist_track:
+        settings.playlist_track_format = env_playlist_track
+
+    logging.info(f"  Playlist fmt : {settings.playlist_folder_format}")
+    logging.info(f"  Track fmt    : {settings.playlist_track_format}")
+
     qobuz = QobuzDL(
         default_folder,
         arguments.quality,
@@ -369,6 +392,8 @@ def _run_sync_watch():
                     playlist_url,
                     default_folder,
                     auto_confirm=auto_yes,
+                    folder_format=settings.playlist_folder_format,
+                    track_format=settings.playlist_track_format,
                 )
                 logging.info(f"{GREEN}  [{idx}/{len(playlists)}] Done.{OFF}")
             except Exception as e:
@@ -569,7 +594,9 @@ def main():
         "folder_format": arguments.folder_format or folder_format,
         "track_format": arguments.track_format or track_format,
         "fallback_folder_format": config.get(section, "fallback_folder_format", fallback="{artist} - {album}"),
-        "multiple_disc_track_format": config.get(section, "multiple_disc_track_format", fallback="{disc_number}.{track_number} - {track_title}")
+        "multiple_disc_track_format": config.get(section, "multiple_disc_track_format", fallback="{disc_number}.{track_number} - {track_title}"),
+        "playlist_folder_format": config.get(section, "playlist_folder_format", fallback="{album_artist}/{year} - {album_title}"),
+        "playlist_track_format": config.get(section, "playlist_track_format", fallback="{track_number:02d} - {track_title}"),
     }
     validate_config_formats(formats_to_validate)
     # -------------------------------

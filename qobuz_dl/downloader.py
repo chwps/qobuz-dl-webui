@@ -94,11 +94,11 @@ QL_DOWNGRADE = "FormatRestrictedByFormatAvailability"
 DEFAULT_FORMATS = {
     "MP3": [
         "{album_artist} - {album_title} ({year}) [MP3]",
-        "{track_number} - {track_title}",
+        "{track_number:02d} - {track_title}",
     ],
     "Unknown": [
         "{album_artist} - {album_title}",
-        "{track_number} - {track_title}",
+        "{track_number:02d} - {track_title}",
     ],
 }
 
@@ -499,9 +499,9 @@ class Download:
         legacy_flag = getattr(self.settings, 'legacy_charmap', False) if hasattr(self, 'settings') else False
         
         if getattr(self, 'is_playlist', False):
-            # Forza un nome file pulito senza numero traccia per le playlist
-            clean_playlist_format = "{artist} - {track_title}"
-            formatted_path = sanitize_filename(clean_filename(clean_playlist_format.format(**filename_attr), legacy_charmap=legacy_flag), replacement_text="_")
+            # Use configured playlist track format (Yubal-inspired: {track_number:02d} - {track_title})
+            playlist_track_fmt = self.track_format if self.track_format and self.track_format != "." else DEFAULT_TRACK
+            formatted_path = sanitize_filename(clean_filename(playlist_track_fmt.format(**filename_attr), legacy_charmap=legacy_flag), replacement_text="_")
         elif multiple and self.settings.multiple_disc_one_dir:
             formatted_path = sanitize_filename(clean_filename(self.settings.multiple_disc_track_format.format(**filename_attr), legacy_charmap=legacy_flag), replacement_text="_")
         else:
@@ -668,7 +668,7 @@ class Download:
             "track_id": track_metadata.get("id"),
             "track_artist": track_artist,
             "track_composer": _safe_get(track_metadata,"composer", "name"),
-            "track_number": f'{track_metadata.get("track_number", 0):02}',
+            "track_number": int(track_metadata.get("track_number", 0)),
             "isrc": track_metadata.get("isrc"),
             "bit_depth": track_metadata.get("maximum_bit_depth"),
             "sampling_rate": track_metadata.get("maximum_sampling_rate"),
@@ -676,7 +676,7 @@ class Download:
             "track_title_base": track_metadata.get("title"),
             "version": track_metadata.get("version"),
             "year": track_metadata.get("release_date_original", "").split("-")[0],
-            "disc_number": f'{track_metadata.get("media_number"):02}',
+            "disc_number": int(track_metadata.get("media_number", 0)),
             "release_date": track_metadata.get("release_date_original"),
             "ExplicitFlag": "[E]" if track_metadata.get("parental_warning") else "",
             "explicit": "[E]" if track_metadata.get("parental_warning") else "",
