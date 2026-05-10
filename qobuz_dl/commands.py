@@ -99,6 +99,28 @@ def sync_playlist_args(subparsers):
     return sync_pl
 
 
+def sync_favorites_args(subparsers):
+    sync_fav = subparsers.add_parser(
+        "sync-favorites",
+        aliases=["sf"],
+        description="Synchronize a local folder with Qobuz favorites tracks. "
+                    "Downloads missing tracks, removes tracks no longer in favorites, "
+                    "and optionally syncs star status to Navidrome.",
+        help="sync favorites with Qobuz + Navidrome",
+    )
+    sync_fav.add_argument(
+        "--yes", "-y",
+        action="store_true",
+        help="Skip confirmation prompt before deleting/downloading",
+    )
+    sync_fav.add_argument(
+        "--no-navidrome",
+        action="store_true",
+        help="Disable Navidrome star sync (only download/remove tracks)",
+    )
+    return sync_fav
+
+
 def sync_watch_args(subparsers):
     sync_watch = subparsers.add_parser(
         "sync-watch",
@@ -436,11 +458,12 @@ def qobuz_dl_args(
     # Inizializza il nuovo comando
     lyrics_cmd = lyrics_args(subparsers)
     sync_pl_cmd = sync_playlist_args(subparsers)
+    sync_fav_cmd = sync_favorites_args(subparsers)
     sync_watch_cmd = sync_watch_args(subparsers)
 
     [
         add_common_arg(i, default_folder, default_quality)
-        for i in (interactive, download, lucky, sync_pl_cmd, sync_watch_cmd)
+        for i in (interactive, download, lucky, sync_pl_cmd, sync_fav_cmd, sync_watch_cmd)
     ]
 
     return parser

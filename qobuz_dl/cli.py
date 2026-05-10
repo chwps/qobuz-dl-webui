@@ -11,7 +11,7 @@ import signal
 import requests
 
 from qobuz_dl.bundle import Bundle
-from qobuz_dl.color import GREEN, RED, YELLOW, OFF, CYAN
+from qobuz_dl.color import GREEN, RED, YELLOW, OFF, CYAN, MAGENTA
 from qobuz_dl.commands import qobuz_dl_args
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.downloader import DEFAULT_FOLDER, DEFAULT_TRACK
@@ -193,7 +193,24 @@ def _reset_config(config_file):
         input(f"Playlist track format (press Enter for '{{track_number:02d}} - {{track_title}}')\n- ")
         or "{track_number:02d} - {track_title}"
     )
-    
+
+    # Favorites sync format configuration
+    config["qobuz"]["favorites_folder_format"] = (
+        input(f"Favorites folder format (press Enter for '{{album_artist}}/{{year}} - {{album_title}}')\n- ")
+        or "{album_artist}/{year} - {album_title}"
+    )
+    config["qobuz"]["favorites_track_format"] = (
+        input(f"Favorites track format (press Enter for '{{track_number:02d}} - {{track_title}}')\n- ")
+        or "{track_number:02d} - {track_title}"
+    )
+
+    # Navidrome integration
+    print(f"\n{YELLOW}[!] Optional: Navidrome integration for auto-star sync{OFF}")
+    print(f"    Leave blank to skip.\n")
+    config["qobuz"]["navidrome_url"] = input("Navidrome URL (e.g. http://localhost:4533)\n- ").strip()
+    config["qobuz"]["navidrome_user"] = input("Navidrome username\n- ").strip()
+    config["qobuz"]["navidrome_password"] = getpass.getpass("Navidrome password\n- ").strip()
+
     with open(config_file, "w") as configfile:
         config.write(configfile)
         
@@ -233,6 +250,19 @@ def _handle_commands(qobuz, arguments):
                 auto_confirm=arguments.yes,
                 folder_format=qobuz.settings.playlist_folder_format,
                 track_format=qobuz.settings.playlist_track_format,
+            )
+        elif arguments.command in ("sync-favorites", "sf"):
+            from qobuz_dl.sync_favorites import sync_favorites
+            sync_favorites(
+                qobuz,
+                qobuz.directory,
+                auto_confirm=arguments.yes,
+                folder_format=qobuz.settings.favorites_folder_format,
+                track_format=qobuz.settings.favorites_track_format,
+                navidrome_url=qobuz.settings.navidrome_url,
+                navidrome_user=qobuz.settings.navidrome_user,
+                navidrome_password=qobuz.settings.navidrome_password,
+                star_to_navidrome=not getattr(arguments, 'no_navidrome', False),
             )
         elif arguments.command == "lucky":
             query = " ".join(arguments.QUERY)
@@ -299,11 +329,16 @@ def _run_sync_watch():
     interval = int(os.environ.get("SYNC_INTERVAL", "21600"))
     sync_dir = os.environ.get("SYNC_DIR", None)
     auto_yes = os.environ.get("SYNC_YES", "false").lower() in ("true", "1", "yes")
+    sync_favorites_enabled = os.environ.get("SYNC_FAVORITES", "false").lower() in ("true", "1", "yes")
+    navidrome_url = os.environ.get("SYNC_NAVI_URL", "").strip()
+    navidrome_user = os.environ.get("SYNC_NAVI_USER", "").strip()
+    navidrome_password = os.environ.get("SYNC_NAVI_PASS", "").strip()
 
     logging.info(f"\n{CYAN}{'='*50}{OFF}")
     logging.info(f"{CYAN}  Qobuz-DL Sync Watch Mode{OFF}")
     logging.info(f"{CYAN}{'='*50}{OFF}")
     logging.info(f"  Playlists  : {len(playlists)}")
+    logging.info(f"  Favorites  : {'enabled' if sync_favorites_enabled else 'disabled'}")
     logging.info(f"  Interval   : {interval}s ({interval//3600}h {interval%3600//60}m)")
     logging.info(f"  Auto-yes   : {auto_yes}")
     if sync_dir:
@@ -350,8 +385,25 @@ def _run_sync_watch():
     if env_playlist_track:
         settings.playlist_track_format = env_playlist_track
 
-    logging.info(f"  Playlist fmt : {settings.playlist_folder_format}")
-    logging.info(f"  Track fmt    : {settings.playlist_track_format}")
+    # Allow env var overrides for favorites formats
+    env_favorites_folder = os.environ.get("SYNC_FAVORITES_FOLDER_FORMAT", "").strip()
+    env_favorites_track = os.environ.get("SYNC_FAVORITES_TRACK_FORMAT", "").strip()
+    if env_favorites_folder:
+        settings.favorites_folder_format = env_favorites_folder
+    if env_favorites_track:
+        settings.favorites_track_format = env_favorites_track
+
+    # Override Navidrome settings from env vars (Docker)
+    if navidrome_url:
+        settings.navidrome_url = navidrome_url
+    if navidrome_user:
+        settings.navidrome_user = navidrome_user
+    if navidrome_password:
+        settings.navidrome_password = navidrome_password
+
+    logging.info(f"  Playlist fmt   : {settings.playlist_folder_format}")
+    logging.info(f"  Track fmt      : {settings.playlist_track_format}")
+    logging.info(f"  Favorites fmt  : {settings.favorites_folder_format}")
 
     qobuz = QobuzDL(
         default_folder,
@@ -398,6 +450,26 @@ def _run_sync_watch():
                 logging.info(f"{GREEN}  [{idx}/{len(playlists)}] Done.{OFF}")
             except Exception as e:
                 logging.error(f"{RED}  [{idx}/{len(playlists)}] Error: {e}{OFF}")
+
+        # --- Sync favorites if enabled ---
+        if sync_favorites_enabled:
+            logging.info(f"{MAGENTA}[Sync Watch] Syncing Qobuz favorites...{OFF}")
+            try:
+                from qobuz_dl.sync_favorites import sync_favorites
+                sync_favorites(
+                    qobuz,
+                    default_folder,
+                    auto_confirm=auto_yes,
+                    folder_format=settings.favorites_folder_format,
+                    track_format=settings.favorites_track_format,
+                    navidrome_url=settings.navidrome_url,
+                    navidrome_user=settings.navidrome_user,
+                    navidrome_password=settings.navidrome_password,
+                    star_to_navidrome=bool(settings.navidrome_url),
+                )
+                logging.info(f"{MAGENTA}[Sync Watch] Favorites synced.{OFF}")
+            except Exception as e:
+                logging.error(f"{RED}[Sync Watch] Favorites sync error: {e}{OFF}")
 
         logging.info(f"\n{YELLOW}[Sync Watch] All playlists synced. Sleeping {interval}s ({interval//3600}h {interval%3600//60}m)...{OFF}")
 

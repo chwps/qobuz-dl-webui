@@ -1,6 +1,7 @@
 from qobuz_dl.constants import (
     DEFAULT_FOLDER, DEFAULT_TRACK, DEFAULT_MULTIPLE_DISC_TRACK,
     DEFAULT_PLAYLIST_FOLDER_FORMAT, DEFAULT_PLAYLIST_TRACK_FORMAT,
+    DEFAULT_FAVORITES_FOLDER_FORMAT, DEFAULT_FAVORITES_TRACK_FORMAT,
 )
 
 class QobuzDLSettings:
@@ -71,6 +72,19 @@ class QobuzDLSettings:
 
         # user_auth_token
         self.user_auth_token = kwargs.get('user_auth_token', '')
+
+        # Favorites sync format (reuse playlist defaults)
+        self.favorites_folder_format = kwargs.get(
+            'favorites_folder_format', DEFAULT_FAVORITES_FOLDER_FORMAT
+        )
+        self.favorites_track_format = kwargs.get(
+            'favorites_track_format', DEFAULT_FAVORITES_TRACK_FORMAT
+        )
+
+        # Navidrome connection for favorites star sync
+        self.navidrome_url = kwargs.get('navidrome_url', '')
+        self.navidrome_user = kwargs.get('navidrome_user', '')
+        self.navidrome_password = kwargs.get('navidrome_password', '')
 
     @staticmethod
     def from_arguments_configparser(arguments, config):
@@ -148,7 +162,20 @@ class QobuzDLSettings:
 
             # user_auth_token
             'user_auth_token': config.get(section, "user_auth_token", fallback=""),
-        
+
+            # Favorites sync format
+            'favorites_folder_format': config.get(
+                section, "favorites_folder_format", fallback=DEFAULT_FAVORITES_FOLDER_FORMAT
+            ),
+            'favorites_track_format': config.get(
+                section, "favorites_track_format", fallback=DEFAULT_FAVORITES_TRACK_FORMAT
+            ),
+
+            # Navidrome connection for favorites star sync
+            'navidrome_url': config.get(section, "navidrome_url", fallback=""),
+            'navidrome_user': config.get(section, "navidrome_user", fallback=""),
+            'navidrome_password': config.get(section, "navidrome_password", fallback=""),
+
             'lrc_files': getattr(arguments, 'lrc_files', config.getboolean(section, "lrc_files", fallback=True)),
         }
         
