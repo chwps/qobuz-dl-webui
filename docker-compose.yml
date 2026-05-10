@@ -9,7 +9,11 @@
 
 services:
   qobuz-dl-sync:
-    build: .
+    # Option 1: utiliser une image pre-construite (decommenter et adapter)
+    image: qobuz-dl-ultimate:latest
+
+    # Option 2: construire localement (decommenter pour rebuild depuis le code source)
+    # build: .
     container_name: qobuz-dl-sync
     environment:
       # Interval in seconds between each sync run (default: 21600 = 6 hours)
@@ -25,12 +29,25 @@ services:
       # Skip interactive confirmation prompts (set to 'true' for unattended)
       - SYNC_YES=true
 
+      # Playlist sync folder format (Yubal-inspired structure)
+      # Default: {album_artist}/{year} - {album_title}
+      # Example: David Bowie/1977 - Heroes
+      # - SYNC_PLAYLIST_FOLDER_FORMAT={album_artist}/{year} - {album_title}
+
+      # Playlist sync track format
+      # Default: {track_number:02d} - {track_title}
+      # Example: 01 - Hero
+      # - SYNC_PLAYLIST_TRACK_FORMAT={track_number:02d} - {track_title}
+
     volumes:
       # Persist the config file (created on first run with 'qobuz-dl -r')
-      - ./config:/root/.config/qobuz-dl
+      # IMPORTANT: adapter ces chemins a ton pool TrueNAS
+      # Exemple : /mnt/tank/qobuz/config:/root/.config/qobuz-dl
+      - /music-qobuz/config:/root/.config/qobuz-dl
 
-      # Your music library mount point
-      - ./music:/music
+      # Votre bibliotheque musicale - le container ecrira dans /music
+      # Exemple : /mnt/tank/qobuz/music:/music
+      - /music-qobuz/music:/music
 
     restart: unless-stopped
     entrypoint: ["python", "-m", "qobuz_dl"]

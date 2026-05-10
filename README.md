@@ -310,6 +310,8 @@ The Ultimate Edition includes powerful local library managers to keep track of y
   | `SYNC_PLAYLISTS` | One or more Qobuz playlist URLs, separated by `;` | (required) |
   | `SYNC_DIR` | Override download directory (ignores config.ini) | value from `config.ini` |
   | `SYNC_YES` | Skip confirmation prompts (`true`/`false`) | `false` |
+  | `SYNC_PLAYLIST_FOLDER_FORMAT` | Folder format for playlist tracks | `{album_artist}/{year} - {album_title}` |
+  | `SYNC_PLAYLIST_TRACK_FORMAT` | Track format for playlist files | `{track_number:02d} - {track_title}` |
 
   **Standalone CLI usage:**
   You can also run sync-watch directly without Docker (e.g., in a screen/tmux session):
