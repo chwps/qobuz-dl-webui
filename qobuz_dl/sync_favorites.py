@@ -76,21 +76,33 @@ def _fetch_favorites_tracks(client):
     """
     Fetch all favorited tracks from Qobuz via paginated API.
 
+    Qobuz API response structure for favorite/getUserFavorites with fav_type="tracks":
+    {
+        "tracks": {
+            "items": [ { "id": ..., "title": ..., "performer": {...}, ... }, ... ],
+            "total": N
+        }
+    }
+
     Returns list of track dicts from Qobuz.
     """
+    fav_type = "tracks"
     all_items = []
     offset = 0
     limit = 100
 
     while True:
-        result = client.get_favorites(fav_type="tracks", limit=limit, offset=offset)
+        result = client.get_favorites(fav_type=fav_type, limit=limit, offset=offset)
         if not result:
             break
 
-        # The API returns { "type": { "items": [...], "total": N } }
-        fav_data = result.get("type", {})
+        # The API returns { fav_type: { "items": [...], "total": N } }
+        # So for fav_type="tracks", it's { "tracks": { "items": [...], "total": N } }
+        fav_data = result.get(fav_type, {})
         items = fav_data.get("items", [])
         total = fav_data.get("total", 0)
+
+        logger.debug(f"      API page: {len(items)} items (total: {total})")
 
         if not items:
             break
