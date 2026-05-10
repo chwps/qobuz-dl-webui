@@ -39,6 +39,25 @@ services:
       # Example: 01 - Hero
       # - SYNC_PLAYLIST_TRACK_FORMAT={track_number:02d} - {track_title}
 
+      # ===== FAVORITES SYNC =====
+      # Enable periodic sync of Qobuz favorites (tracks)
+      # When enabled, downloads new favorites and removes tracks no longer favorited
+      # Also syncs star status to Navidrome if configured below
+      - SYNC_FAVORITES=false
+
+      # Favorites sync folder format (same as playlists by default)
+      # - SYNC_FAVORITES_FOLDER_FORMAT={album_artist}/{year} - {album_title}
+
+      # Favorites sync track format
+      # - SYNC_FAVORITES_TRACK_FORMAT={track_number:02d} - {track_title}
+
+      # ===== NAVIDROME INTEGRATION =====
+      # Navidrome connection for automatic star sync
+      # When configured, newly downloaded favorites are auto-starred in Navidrome
+      # - SYNC_NAVI_URL=http://navidrome:4533
+      # - SYNC_NAVI_USER=admin
+      # - SYNC_NAVI_PASS=your_password
+
     volumes:
       # Persist the config file (created on first run with 'qobuz-dl -r')
       # IMPORTANT: adapter ces chemins a ton pool TrueNAS
