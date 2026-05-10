@@ -266,3 +266,110 @@ class NavidromeClient:
         except Exception as e:
             logger.debug(f"Failed to get playlists for song {song_id}: {e}")
             return []
+
+    # ------------------------------------------------------------------ #
+    #  Library index (native API)
+    # ------------------------------------------------------------------ #
+
+    def _get_native_token(self):
+        """Authenticate via native API and return Bearer token, or None."""
+        try:
+            import requests as req
+            login_url = f"{self.server_url}/api/login"
+            resp = req.post(login_url, json={
+                "username": self.username,
+                "password": self.password,
+            }, timeout=10)
+            if resp.status_code == 200:
+                return resp.json().get("token", "")
+        except Exception as e:
+            logger.debug(f"Native API login error: {e}")
+        return None
+
+    def get_library_index(self):
+        """
+        Build an in-memory index of ALL songs in Navidrome's library
+        using the native API (/api/folders + /api/album/{id}).
+
+        Strategy:
+        1. GET /api/folders to get the folder tree (includes album IDs)
+        2. Recursively walk the tree collecting all album IDs
+        3. GET /api/album/{id} for each album to get its songs
+
+        Returns a list of dicts with keys:
+            id, title, artist, album, duration, isrc
+        """
+        import requests as req
+
+        token = self._get_native_token()
+        if not token:
+            logger.debug("Cannot authenticate with native Navidrome API for library index")
+            return []
+
+        headers = {"Authorization": f"Bearer {token}"}
+        all_songs = []
+        seen_album_ids = set()
+
+        # --- Step 1: Fetch folder tree and collect album IDs ---
+        try:
+            resp = req.get(f"{self.server_url}/api/folders", headers=headers, timeout=30)
+            if resp.status_code != 200:
+                logger.debug(f"Native API /api/folders failed: {resp.status_code}")
+                return []
+
+            folders = resp.json().get("data", [])
+
+            # Recursive function to walk folder tree and collect album IDs
+            def collect_album_ids(node, depth=0):
+                if depth > 20:
+                    return
+                for child in node.get("children", []):
+                    child_type = child.get("type", "")
+                    child_id = child.get("id", "")
+                    if child_type == "album" and child_id:
+                        seen_album_ids.add(child_id)
+                    elif child_type == "folder":
+                        collect_album_ids(child, depth + 1)
+
+            for folder in folders:
+                collect_album_ids(folder)
+
+            logger.info(f"  Native API: found {len(folders)} media folder(s), {len(seen_album_ids)} album(s)")
+
+        except Exception as e:
+            logger.debug(f"Error collecting album IDs from folder tree: {e}")
+            return []
+
+        # --- Step 2: Fetch each album's songs ---
+        errors = 0
+        for album_id in seen_album_ids:
+            try:
+                album_url = f"{self.server_url}/api/album/{album_id}"
+                aresp = req.get(album_url, headers=headers, timeout=15)
+                if aresp.status_code != 200:
+                    errors += 1
+                    if errors < 5:
+                        logger.debug(f"  Album {album_id}: HTTP {aresp.status_code}")
+                    continue
+
+                album_data = aresp.json().get("data", {})
+                album_name = album_data.get("name", "")
+                songs = album_data.get("songs", [])
+
+                for s in songs:
+                    all_songs.append({
+                        "id": s.get("id", ""),
+                        "title": s.get("title", ""),
+                        "artist": s.get("artistName", s.get("artist", "")),
+                        "album": album_name or s.get("albumName", ""),
+                        "duration": int(s.get("duration", 0)) if s.get("duration") else 0,
+                        "isrc": s.get("isrc", ""),
+                    })
+
+            except Exception as e:
+                errors += 1
+                if errors <= 3:
+                    logger.debug(f"  Error fetching album {album_id}: {e}")
+
+        logger.info(f"  Native API: built index with {len(all_songs)} songs from {len(seen_album_ids)} albums")
+        return all_songs

@@ -111,14 +111,22 @@ def _fetch_favorites_tracks(client):
     return all_items
 
 
-def _find_navidrome_track(nd_client, qobuz_item, local_tags=None):
+def _find_navidrome_track(nd_client, qobuz_item, local_tags=None, library_index=None):
     """
     Find the Navidrome song ID for a Qobuz track.
 
     Matching strategy (in order of reliability):
-    1. ISRC exact match (most reliable)
-    2. Title + Artist exact search
-    3. Fuzzy match by title + artist + duration
+    1. ISRC exact match against library index (pre-loaded)
+    2. Title + Artist exact match against library index
+    3. Fuzzy match against library index
+    4. Fallback: ISRC search via Subsonic search3
+    5. Fallback: Title + Artist search via Subsonic search3
+
+    Args:
+        nd_client: NavidromeClient instance
+        qobuz_item: Track dict from Qobuz API
+        local_tags: Optional dict with local file tags (isrc, title, artist, album_artist)
+        library_index: Optional pre-loaded list of songs from Navidrome native API
 
     Returns Navidrome song_id string, or None if not found
     """
@@ -134,7 +142,47 @@ def _find_navidrome_track(nd_client, qobuz_item, local_tags=None):
     else:
         isrc = qobuz_item.get("isrc", "")
 
-    # --- Strategy 1: ISRC search ---
+    # --- Phase 1: Try library index (pre-loaded, fast, reliable) ---
+    if library_index:
+        # 1a. ISRC exact match
+        if isrc:
+            for s in library_index:
+                if s.get("isrc", "").upper() == isrc.upper():
+                    return s["id"]
+
+        # 1b. Title + Artist exact match
+        for s in library_index:
+            if (s["title"].lower() == q_title.lower() and
+                    s["artist"].lower() == q_artist.lower()):
+                if q_duration and s.get("duration", 0):
+                    if abs(s["duration"] - q_duration) > 3:
+                        continue
+                return s["id"]
+
+        # 1c. Fuzzy match
+        best_id = None
+        best_score = 0.0
+        for s in library_index:
+            title_ratio = SequenceMatcher(None, q_title.lower(), s["title"].lower()).ratio()
+            artist_ratio = SequenceMatcher(None, q_artist.lower(), s["artist"].lower()).ratio()
+            combined = title_ratio * 0.7 + artist_ratio * 0.3
+            dur_bonus = 0.0
+            if q_duration and s.get("duration", 0):
+                dur_diff = abs(s["duration"] - q_duration)
+                if dur_diff <= 2:
+                    dur_bonus = 0.1
+                elif dur_diff > 10:
+                    continue
+            score = combined + dur_bonus
+            if score > best_score:
+                best_score = score
+                best_id = s["id"]
+
+        if best_score >= 0.75:
+            return best_id
+
+    # --- Phase 2: Fallback to Subsonic search3 (slower, less reliable) ---
+    # Strategy 1: ISRC search
     if isrc:
         logger.debug(f"    Searching Navidrome by ISRC: {isrc}")
         results = nd_client.search_track(isrc, limit=10)
@@ -142,7 +190,7 @@ def _find_navidrome_track(nd_client, qobuz_item, local_tags=None):
             if r.get("isrc", "").upper() == isrc.upper():
                 return r["id"]
 
-    # --- Strategy 2: Title + Artist search ---
+    # Strategy 2: Title + Artist search
     search_query = f"{q_title}"
     if q_artist:
         search_query = f"{q_artist} {q_title}"
@@ -160,7 +208,7 @@ def _find_navidrome_track(nd_client, qobuz_item, local_tags=None):
                     continue
             return r["id"]
 
-    # --- Strategy 3: Fuzzy match ---
+    # Strategy 3: Fuzzy match
     best_id = None
     best_score = 0.0
 
@@ -517,6 +565,11 @@ def _sync_stars_to_navidrome(nd_url, nd_user, nd_pass, remote_ids,
                               local_tracks, base_directory, enable_sync=True):
     """
     Sync Qobuz favorites status to Navidrome star status.
+
+    Strategy:
+    1. Build a full in-memory index of Navidrome library via native API
+    2. For each Qobuz favorite, find matching Navidrome track using the index
+    3. Star the matched track in Navidrome
     """
     if not enable_sync or not nd_url or not nd_user or not nd_pass:
         logger.info(f"  {YELLOW}[!] Navidrome sync disabled (no URL/user/pass configured){OFF}")
@@ -529,6 +582,16 @@ def _sync_stars_to_navidrome(nd_url, nd_user, nd_pass, remote_ids,
         logger.error(f"  {RED}[-] Cannot reach Navidrome. Skipping star sync.{OFF}")
         return
 
+    # --- Build full library index from Navidrome ---
+    logger.info(f"  Building Navidrome library index (native API)...")
+    library_index = nd.get_library_index()
+    if not library_index:
+        logger.warning(f"  {YELLOW}[!] Library index is empty. Falling back to search3 only.{OFF}")
+        library_index = None
+    else:
+        logger.info(f"  Index built: {len(library_index)} tracks indexed")
+
+    # --- Fetch current starred tracks ---
     logger.info(f"  Fetching current starred tracks from Navidrome...")
     try:
         nd_starred = nd.get_starred_tracks()
@@ -537,9 +600,13 @@ def _sync_stars_to_navidrome(nd_url, nd_user, nd_pass, remote_ids,
         return
 
     logger.info(f"  Found {len(nd_starred)} starred tracks in Navidrome.")
+    logger.info(f"  Matching {len(remote_ids)} Qobuz favorites against index...")
+
+    # --- Build set of already-starred IDs for quick lookup ---
+    already_starred_ids = {t["id"] for t in nd_starred if t.get("id")}
 
     starred_count = 0
-    unstarred_count = 0
+    already_starred_count = 0
     matched_count = 0
     not_found_count = 0
 
@@ -552,26 +619,37 @@ def _sync_stars_to_navidrome(nd_url, nd_user, nd_pass, remote_ids,
         if local_path:
             local_tags = _read_track_tags(local_path)
 
-        # Find Navidrome song ID
-        nd_song_id = _find_navidrome_track(nd, item, local_tags)
+        # Find Navidrome song ID using the pre-built index
+        nd_song_id = _find_navidrome_track(nd, item, local_tags, library_index=library_index)
 
         if nd_song_id:
             matched_count += 1
+            # Skip if already starred
+            if nd_song_id in already_starred_ids:
+                already_starred_count += 1
+                continue
             if nd.star_track(nd_song_id):
                 starred_count += 1
+                already_starred_ids.add(nd_song_id)
             else:
                 logger.debug(f"    Failed to star: {title}")
         else:
             not_found_count += 1
             logger.debug(f"    Not found in Navidrome: {performer} - {title}")
 
+    logger.info(f"")
     logger.info(f"  {GREEN}  Matched {matched_count} tracks in Navidrome library{OFF}")
+    if already_starred_count:
+        logger.info(f"  {YELLOW}  Already starred (skipped): {already_starred_count}{OFF}")
     if not_found_count:
         logger.info(f"  {YELLOW}  {not_found_count} tracks not found in Navidrome (not downloaded yet){OFF}")
 
     if matched_count == 0 and not_found_count > 0:
         logger.info(f"  {YELLOW}[!] No matches found in Navidrome.{OFF}")
-        logger.info(f"  {YELLOW}    Make sure your library is scanned and tracks have been synced first.{OFF}")
+        logger.info(f"  {YELLOW}    Possible causes:{OFF}")
+        logger.info(f"  {YELLOW}    - Navidrome has not scanned the folder yet{OFF}")
+        logger.info(f"  {YELLOW}    - Music folder path differs between container and Navidrome config{OFF}")
+        logger.info(f"  {YELLOW}    - Trigger a library scan in Navidrome settings{OFF}")
 
-    logger.info(f"  {GREEN}  Starred {starred_count} tracks in Navidrome{OFF}")
+    logger.info(f"  {GREEN}  Starred {starred_count} new tracks in Navidrome{OFF}")
     logger.info(f"  {YELLOW}  Note: Unstar (remove favorites) is disabled to prevent accidental removal.{OFF}")

@@ -188,7 +188,11 @@ def _check_can_delete(track_id, fpath, db_path, nd_client, qobuz_item, local_tag
     # 2. Check Navidrome for other playlists
     if nd_client and qobuz_item:
         from qobuz_dl.sync_favorites import _find_navidrome_track as find_nd_track
-        nd_song_id = find_nd_track(nd_client, qobuz_item, local_tags)
+
+        # Build library index for reliable matching
+        library_index = nd_client.get_library_index() if nd_client else None
+
+        nd_song_id = find_nd_track(nd_client, qobuz_item, local_tags, library_index=library_index)
         if nd_song_id:
             playlists = nd_client.get_playlists_for_song(nd_song_id)
             if playlists:
@@ -311,31 +315,20 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False, folder_format=None,
     protected_count = 0
 
     if delete_removed and raw_to_delete_ids:
-        from mutagen.flac import FLAC as FLACFmt
-        from mutagen.id3 import ID3 as ID3Fmt
+        from qobuz_dl.sync_favorites import _read_track_tags
 
         for tid in raw_to_delete_ids:
             fpath = local_tracks[tid]
-            local_tags = None
-            try:
-                if fpath.lower().endswith('.flac'):
-                    audio = FLACFmt(fpath)
-                    local_tags = {
-                        'isrc': audio.get("ISRC", [None])[0] or '',
-                        'title': audio.get("TITLE", [None])[0] or '',
-                        'artist': audio.get("ARTIST", [None])[0] or '',
-                    }
-                elif fpath.lower().endswith('.mp3'):
-                    audio = ID3Fmt(fpath)
-                    local_tags = {
-                        'isrc': str(audio.get("TSRC", {}).text[0]) if audio.get("TSRC") else '',
-                        'title': '',
-                        'artist': '',
-                    }
-            except Exception:
-                pass
+            local_tags = _read_track_tags(fpath)
 
-            can_del, reason = _check_can_delete(tid, fpath, db_path, nd_client, None, local_tags)
+            # Build a minimal qobuz_item from local tags for Navidrome matching
+            qobuz_item_for_check = {
+                "title": local_tags.get("title", ""),
+                "performer": {"name": local_tags.get("artist", "")},
+                "isrc": local_tags.get("isrc", ""),
+            }
+
+            can_del, reason = _check_can_delete(tid, fpath, db_path, nd_client, qobuz_item_for_check, local_tags)
             if can_del:
                 actually_to_delete.add(tid)
             else:
