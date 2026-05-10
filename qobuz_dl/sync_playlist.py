@@ -487,7 +487,8 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False, folder_format=None,
     logger.info(f"  {RED}✕ Deleted    : {deleted_count} files{OFF}")
     if protected_count:
         logger.info(f"  {YELLOW}  Protected  : {protected_count} files{OFF}")
-    logger.info(f"  {GREEN}✓ Total now  : {len(remote_ids)} tracks{OFF}\n")
+    final_local, _ = _scan_local_tracks(base_directory)
+    logger.info(f"  {GREEN}✓ Total now  : {len(final_local)} tracks{OFF}\n")
 
 
 def _build_m3u(base_directory, playlist_name, playlist_id, remote_items):

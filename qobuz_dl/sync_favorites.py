@@ -358,7 +358,8 @@ def sync_favorites(qobuz_dl, folder, auto_confirm=False,
         logger.info(f"\n{GREEN}{'='*50}{OFF}")
         logger.info(f"{GREEN}  FAVORITES SYNC COMPLETE{OFF}")
         logger.info(f"{GREEN}{'='*50}{OFF}")
-        logger.info(f"  {GREEN}✓ Total now  : {len(remote_ids)} tracks{OFF}\n")
+        final_local, _ = _scan_local_tracks(base_directory)
+        logger.info(f"  {GREEN}✓ Total now  : {len(final_local)} tracks{OFF}\n")
         return
 
     # Print details
@@ -471,6 +472,9 @@ def sync_favorites(qobuz_dl, folder, auto_confirm=False,
 
     # --- 7. Sync stars to Navidrome ---
     logger.info(f"\n{CYAN}[6/7] Syncing stars to Navidrome...{OFF}")
+    # Re-scan local tracks to include newly downloaded files for matching
+    local_tracks, _ = _scan_local_tracks(base_directory)
+    logger.info(f"  Re-scanned: {len(local_tracks)} local tracks available for matching")
     _sync_stars_to_navidrome(
         nd_url=navidrome_url,
         nd_user=navidrome_user,
@@ -489,7 +493,8 @@ def sync_favorites(qobuz_dl, folder, auto_confirm=False,
     logger.info(f"  {RED}✕ Deleted    : {deleted_count} files{OFF}")
     if protected_count:
         logger.info(f"  {YELLOW}  Protected  : {protected_count} files{OFF}")
-    logger.info(f"  {GREEN}✓ Total now  : {len(remote_ids)} tracks{OFF}\n")
+    final_local, _ = _scan_local_tracks(base_directory)
+    logger.info(f"  {GREEN}✓ Total now  : {len(final_local)} tracks{OFF}\n")
 
 
 def _build_favorites_m3u(base_directory, remote_items):
