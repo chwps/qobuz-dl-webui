@@ -51,6 +51,16 @@ services:
       # Favorites sync track format
       # - SYNC_FAVORITES_TRACK_FORMAT={track_number:02d} - {track_title}
 
+      # Whether to delete local files when tracks are removed from Qobuz favorites
+      # false = keep downloaded tracks even if unfavorited (default, safe)
+      # true = remove tracks no longer in favorites
+      - SYNC_FAVORITES_DELETE_REMOVED=false
+
+      # Whether to delete local files when tracks are removed from Qobuz playlists
+      # false = keep downloaded tracks even if removed from playlist (default, safe)
+      # true = remove tracks no longer in playlist
+      - SYNC_PLAYLIST_DELETE_REMOVED=false
+
       # ===== NAVIDROME INTEGRATION =====
       # Navidrome connection for automatic star sync
       # When configured, newly downloaded favorites are auto-starred in Navidrome
