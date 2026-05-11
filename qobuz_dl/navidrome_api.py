@@ -6,12 +6,23 @@ library indexing, and playlist lookup for favorites synchronization.
 """
 
 import logging
+import re
 import requests
 import xml.etree.ElementTree as ET
 
 from qobuz_dl.color import GREEN, RED, YELLOW, OFF
 
 logger = logging.getLogger(__name__)
+
+
+def _strip_namespace(xml_bytes):
+    """Remove XML namespace prefixes so ElementTree can query tags simply."""
+    text = xml_bytes.decode("utf-8", errors="replace")
+    # Remove xmlns:ns0="..." declarations
+    text = re.sub(r'\sxmlns(?:\w*):?\w*="[^"]*"', "", text)
+    # Remove ns0: prefixes from tags
+    text = re.sub(r'<(/?)(\w+:)([^>]*>)', r'<\1\3', text)
+    return text.encode("utf-8")
 
 
 class NavidromeClient:
@@ -40,7 +51,7 @@ class NavidromeClient:
         Make an authenticated Subsonic REST call.
         Every request carries v, c, u, p via requests.params (URL-encoded).
 
-        Returns the parsed XML root element, or None on failure.
+        Returns the parsed XML root element (namespaces stripped), or None on failure.
         """
         qs = {
             "v": "1.16.1",
@@ -55,7 +66,10 @@ class NavidromeClient:
             url = f"{self.api_url}/{endpoint}"
             resp = requests.get(url, params=qs, timeout=15, verify=self.verify_ssl)
             resp.raise_for_status()
-            root = ET.fromstring(resp.content)
+
+            # Strip namespaces so we can query tags without {namespace} prefix
+            clean_xml = _strip_namespace(resp.content)
+            root = ET.fromstring(clean_xml)
 
             status = root.get("status")
             if status != "ok":
@@ -80,18 +94,6 @@ class NavidromeClient:
             return None
 
     # ------------------------------------------------------------------ #
-    #  Namespace helper
-    # ------------------------------------------------------------------ #
-
-    @staticmethod
-    def _get_ns(root):
-        """Extract namespace prefix from root tag, e.g. '{http://subsonic.org/restapi}'."""
-        if "}" in root.tag:
-            ns = root.tag.split("}")[0] + "}"
-            return ns
-        return ""
-
-    # ------------------------------------------------------------------ #
     #  Connection test
     # ------------------------------------------------------------------ #
 
@@ -109,17 +111,17 @@ class NavidromeClient:
     # ------------------------------------------------------------------ #
 
     @staticmethod
-    def _parse_song(song_elem, ns=""):
-        """Extract a flat dict from a <song> XML element."""
+    def _parse_song(song_elem):
+        """Extract a flat dict from a <song> XML element (no namespace needed)."""
         track = {}
         for key in ["id", "title", "artist", "album", "albumId", "coverArt", "size"]:
-            el = song_elem.find(f"{ns}{key}")
+            el = song_elem.find(key)
             track[key] = el.text if el is not None and el.text else ""
 
-        dur_el = song_elem.find(f"{ns}durationSec")
+        dur_el = song_elem.find("durationSec")
         track["duration"] = int(dur_el.text) if dur_el is not None and dur_el.text else 0
 
-        isrc_el = song_elem.find(f"{ns}isrc")
+        isrc_el = song_elem.find("isrc")
         track["isrc"] = isrc_el.text if isrc_el is not None and isrc_el.text else ""
 
         return track
@@ -147,12 +149,11 @@ class NavidromeClient:
         if root is None:
             return []
 
-        ns = self._get_ns(root)
-        container = root.find(f"{ns}searchResult3")
+        container = root.find("searchResult3")
         if container is None:
             return []
 
-        return [self._parse_song(s, ns=ns) for s in container.findall(f"{ns}song")]
+        return [self._parse_song(s) for s in container.findall("song")]
 
     # ------------------------------------------------------------------ #
     #  Star / Unstar
@@ -189,24 +190,21 @@ class NavidromeClient:
             if root is None:
                 break
 
-            ns = self._get_ns(root)
-
-            # Navidrome wraps in <starred2List>
-            starred_list = root.find(f"{ns}starred2List")
+            starred_list = root.find("starred2List")
             if starred_list is None:
                 break
 
-            entries = starred_list.findall(f"{ns}entry")
+            entries = starred_list.findall("entry")
             if not entries:
                 break
 
             for entry in entries:
-                ss = entry.find(f"{ns}starredSong")
+                ss = entry.find("starredSong")
                 if ss is None:
                     continue
                 track = {"id": ss.get("id", "")}
                 for key in ["title", "artist", "album"]:
-                    el = ss.find(f"{ns}{key}")
+                    el = ss.find(key)
                     track[key] = el.text if el is not None and el.text else ""
                 all_tracks.append(track)
 
@@ -225,11 +223,10 @@ class NavidromeClient:
         root = self._api_call("getSong", {"id": song_id})
         if root is None:
             return None
-        ns = self._get_ns(root)
-        song = root.find(f"{ns}song")
+        song = root.find("song")
         if song is None:
             return None
-        return self._parse_song(song, ns=ns)
+        return self._parse_song(song)
 
     # ------------------------------------------------------------------ #
     #  Playlist lookup for a song (Subsonic REST only)
@@ -246,18 +243,17 @@ class NavidromeClient:
         if root is None:
             return []
 
-        ns = self._get_ns(root)
-        playlists_elem = root.find(f"{ns}playlists")
+        playlists_elem = root.find("playlists")
         if playlists_elem is None:
             return []
 
         matching = []
-        for pl in playlists_elem.findall(f"{ns}playlist"):
-            entries = pl.findall(f"{ns}entry")
+        for pl in playlists_elem.findall("playlist"):
+            entries = pl.findall("entry")
             for entry in entries:
                 eid = entry.get("songId", "")
                 if eid == song_id:
-                    name_el = pl.find(f"{ns}name")
+                    name_el = pl.find("name")
                     name = name_el.text if name_el is not None and name_el.text else "Unknown"
                     matching.append(name)
                     break
@@ -286,8 +282,7 @@ class NavidromeClient:
             logger.warning("  Subsonic: getMusicFolders returned no data")
             return []
 
-        ns = self._get_ns(root)
-        music_folders = root.findall(f"{ns}musicFolder")
+        music_folders = root.findall(".//musicFolder")
         if not music_folders:
             raw = ET.tostring(root, encoding="unicode")
             logger.warning(
@@ -304,7 +299,7 @@ class NavidromeClient:
             mf_name = mf.get("name", "unknown")
             if not mf_id:
                 continue
-            songs = self._get_children_songs(mf_id, ns, depth=0)
+            songs = self._get_children_songs(mf_id, depth=0)
             logger.info(f"    Folder '{mf_name}' ({mf_id}): {len(songs)} songs")
             all_songs.extend(songs)
 
@@ -314,7 +309,7 @@ class NavidromeClient:
         )
         return all_songs
 
-    def _get_children_songs(self, parent_id, ns, depth=0):
+    def _get_children_songs(self, parent_id, depth=0):
         """
         Recursively get all songs under a folder/artist/album.
         Returns list of song dicts.
@@ -334,7 +329,7 @@ class NavidromeClient:
             if root is None:
                 break
 
-            children = root.findall(f"{ns}child")
+            children = root.findall(".//child")
             if not children:
                 break
 
@@ -342,11 +337,11 @@ class NavidromeClient:
                 child_type = child.get("type")
                 child_id = child.get("id")
                 if child_type == "song":
-                    song_data = self._parse_song(child, ns=ns)
+                    song_data = self._parse_song(child)
                     song_data["id"] = child_id
                     all_songs.append(song_data)
                 elif child_type in ("album", "artist"):
-                    sub_songs = self._get_children_songs(child_id, ns, depth + 1)
+                    sub_songs = self._get_children_songs(child_id, depth + 1)
                     all_songs.extend(sub_songs)
                 # Ignore directories and playlists
 
