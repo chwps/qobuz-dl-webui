@@ -268,6 +268,7 @@ def _check_can_delete(track_id, fpath, db_path, nd_client, qobuz_item, local_tag
 def sync_favorites(qobuz_dl, folder, auto_confirm=False,
                    folder_format=None, track_format=None,
                    navidrome_url=None, navidrome_user=None, navidrome_password=None,
+                   navidrome_verify_ssl=True,
                    star_to_navidrome=True,
                    delete_removed=False,
                    db_path=None):
@@ -319,7 +320,10 @@ def sync_favorites(qobuz_dl, folder, auto_confirm=False,
     nd_client = None
     if navidrome_url and navidrome_user and navidrome_password:
         try:
-            nd_client = NavidromeClient(navidrome_url, navidrome_user, navidrome_password)
+            nd_client = NavidromeClient(
+                navidrome_url, navidrome_user, navidrome_password,
+                verify_ssl=navidrome_verify_ssl,
+            )
             if nd_client.test_connection():
                 logger.info(f"{CYAN}      Navidrome connected for safety checks.{OFF}")
         except Exception as e:
@@ -402,6 +406,7 @@ def sync_favorites(qobuz_dl, folder, auto_confirm=False,
                 local_tracks=local_tracks,
                 base_directory=base_directory,
                 enable_sync=True,
+                verify_ssl=navidrome_verify_ssl,
             )
         logger.info(f"\n{GREEN}{'='*50}{OFF}")
         logger.info(f"{GREEN}  FAVORITES SYNC COMPLETE{OFF}")
@@ -531,6 +536,7 @@ def sync_favorites(qobuz_dl, folder, auto_confirm=False,
         local_tracks=local_tracks,
         base_directory=base_directory,
         enable_sync=star_to_navidrome,
+        verify_ssl=navidrome_verify_ssl,
     )
 
     # --- Final summary ---
@@ -562,7 +568,8 @@ def _build_favorites_m3u(base_directory, remote_items):
 # ---------------------------------------------------------------------------
 
 def _sync_stars_to_navidrome(nd_url, nd_user, nd_pass, remote_ids,
-                              local_tracks, base_directory, enable_sync=True):
+                              local_tracks, base_directory, enable_sync=True,
+                              verify_ssl=True):
     """
     Sync Qobuz favorites status to Navidrome star status.
 
@@ -576,7 +583,7 @@ def _sync_stars_to_navidrome(nd_url, nd_user, nd_pass, remote_ids,
         return
 
     logger.info(f"  Connecting to Navidrome: {nd_url}...")
-    nd = NavidromeClient(nd_url, nd_user, nd_pass)
+    nd = NavidromeClient(nd_url, nd_user, nd_pass, verify_ssl=verify_ssl)
 
     if not nd.test_connection():
         logger.error(f"  {RED}[-] Cannot reach Navidrome. Skipping star sync.{OFF}")
@@ -586,8 +593,13 @@ def _sync_stars_to_navidrome(nd_url, nd_user, nd_pass, remote_ids,
     logger.info(f"  Building Navidrome library index (native API)...")
     library_index = nd.get_library_index()
     if not library_index:
-        logger.warning(f"  {YELLOW}[!] Library index is empty. Falling back to search3 only.{OFF}")
-        library_index = None
+        logger.warning(f"  {YELLOW}[!] Native API library index empty. Trying Subsonic fallback...{OFF}")
+        library_index = nd.get_library_index_subsonic()
+        if not library_index:
+            logger.warning(f"  {YELLOW}[!] Subsonic library index also empty. Falling back to search3 only.{OFF}")
+            library_index = None
+        else:
+            logger.info(f"  Subsonic fallback: {len(library_index)} tracks indexed")
     else:
         logger.info(f"  Index built: {len(library_index)} tracks indexed")
 
@@ -635,7 +647,8 @@ def _sync_stars_to_navidrome(nd_url, nd_user, nd_pass, remote_ids,
                 logger.debug(f"    Failed to star: {title}")
         else:
             not_found_count += 1
-            logger.debug(f"    Not found in Navidrome: {performer} - {title}")
+            if not_found_count <= 10:
+                logger.info(f"    Not found in Navidrome: {performer} - {title}")
 
     logger.info(f"")
     logger.info(f"  {GREEN}  Matched {matched_count} tracks in Navidrome library{OFF}")
@@ -649,6 +662,8 @@ def _sync_stars_to_navidrome(nd_url, nd_user, nd_pass, remote_ids,
         logger.info(f"  {YELLOW}    Possible causes:{OFF}")
         logger.info(f"  {YELLOW}    - Navidrome has not scanned the folder yet{OFF}")
         logger.info(f"  {YELLOW}    - Music folder path differs between container and Navidrome config{OFF}")
+        logger.info(f"  {YELLOW}    - SSL certificate verification failed (try verify_ssl=false){OFF}")
+        logger.info(f"  {YELLOW}    - Navidrome user lacks read permissions on music folder{OFF}")
         logger.info(f"  {YELLOW}    - Trigger a library scan in Navidrome settings{OFF}")
 
     logger.info(f"  {GREEN}  Starred {starred_count} new tracks in Navidrome{OFF}")

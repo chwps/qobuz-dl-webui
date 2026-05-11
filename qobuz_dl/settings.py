@@ -91,6 +91,7 @@ class QobuzDLSettings:
         self.navidrome_url = kwargs.get('navidrome_url', '')
         self.navidrome_user = kwargs.get('navidrome_user', '')
         self.navidrome_password = kwargs.get('navidrome_password', '')
+        self.navidrome_verify_ssl = kwargs.get('navidrome_verify_ssl', True)
 
     @staticmethod
     def from_arguments_configparser(arguments, config):
@@ -182,6 +183,7 @@ class QobuzDLSettings:
             'navidrome_url': config.get(section, "navidrome_url", fallback=""),
             'navidrome_user': config.get(section, "navidrome_user", fallback=""),
             'navidrome_password': config.get(section, "navidrome_password", fallback=""),
+            'navidrome_verify_ssl': config.getboolean(section, "navidrome_verify_ssl", fallback=True),
 
             # Favorites sync delete removed
             'favorites_delete_removed': config.getboolean(section, "favorites_delete_removed", fallback=False),

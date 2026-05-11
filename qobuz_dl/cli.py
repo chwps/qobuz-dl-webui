@@ -211,6 +211,11 @@ def _reset_config(config_file):
     config["qobuz"]["navidrome_user"] = input("Navidrome username\n- ").strip()
     config["qobuz"]["navidrome_password"] = getpass.getpass("Navidrome password\n- ").strip()
 
+    # SSL verification for self-signed certificates
+    if config["qobuz"]["navidrome_url"]:
+        ssl_answer = input("Disable SSL certificate verification? (self-signed cert) [y/N]\n- ").strip().lower()
+        config["qobuz"]["navidrome_verify_ssl"] = "false" if ssl_answer in ("y", "yes") else "true"
+
     with open(config_file, "w") as configfile:
         config.write(configfile)
         
@@ -267,6 +272,7 @@ def _handle_commands(qobuz, arguments):
                 navidrome_url=qobuz.settings.navidrome_url,
                 navidrome_user=qobuz.settings.navidrome_user,
                 navidrome_password=qobuz.settings.navidrome_password,
+                navidrome_verify_ssl=qobuz.settings.navidrome_verify_ssl,
                 star_to_navidrome=not getattr(arguments, 'no_navidrome', False),
                 delete_removed=qobuz.settings.favorites_delete_removed,
                 db_path=qobuz.downloads_db,
@@ -340,6 +346,7 @@ def _run_sync_watch():
     navidrome_url = os.environ.get("SYNC_NAVI_URL", "").strip()
     navidrome_user = os.environ.get("SYNC_NAVI_USER", "").strip()
     navidrome_password = os.environ.get("SYNC_NAVI_PASS", "").strip()
+    navidrome_verify_ssl_str = os.environ.get("SYNC_NAVI_VERIFY_SSL", "").strip().lower()
 
     logging.info(f"\n{CYAN}{'='*50}{OFF}")
     logging.info(f"{CYAN}  Qobuz-DL Sync Watch Mode{OFF}")
@@ -421,6 +428,10 @@ def _run_sync_watch():
         settings.navidrome_user = navidrome_user
     if navidrome_password:
         settings.navidrome_password = navidrome_password
+    if navidrome_verify_ssl_str in ("true", "1", "yes"):
+        settings.navidrome_verify_ssl = True
+    elif navidrome_verify_ssl_str in ("false", "0", "no"):
+        settings.navidrome_verify_ssl = False
 
     logging.info(f"  Playlist fmt   : {settings.playlist_folder_format}")
     logging.info(f"  Track fmt      : {settings.playlist_track_format}")
@@ -491,6 +502,7 @@ def _run_sync_watch():
                     navidrome_url=settings.navidrome_url,
                     navidrome_user=settings.navidrome_user,
                     navidrome_password=settings.navidrome_password,
+                    navidrome_verify_ssl=settings.navidrome_verify_ssl,
                     star_to_navidrome=bool(settings.navidrome_url),
                     delete_removed=settings.favorites_delete_removed,
                     db_path=QOBUZ_DB,

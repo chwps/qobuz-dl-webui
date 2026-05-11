@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class NavidromeClient:
     """Client for Navidrome's Subsonic-compatible API."""
 
-    def __init__(self, server_url, username, password):
+    def __init__(self, server_url, username, password, verify_ssl=True):
         """
         Initialize the Navidrome client.
 
@@ -26,11 +26,13 @@ class NavidromeClient:
             server_url: Base URL of Navidrome (e.g. 'http://localhost:4533')
             username: Navidrome username
             password: Navidrome password
+            verify_ssl: Whether to verify SSL certificates (default: True)
         """
         self.server_url = server_url.rstrip("/")
         self.api_url = f"{self.server_url}/rest"
         self.username = username
         self.password = password
+        self.verify_ssl = verify_ssl
 
     # ------------------------------------------------------------------ #
     #  Core HTTP helper
@@ -54,7 +56,12 @@ class NavidromeClient:
             qs.update(params)
 
         try:
-            resp = requests.get(f"{self.api_url}/{endpoint}", params=qs, timeout=15)
+            resp = requests.get(
+                f"{self.api_url}/{endpoint}",
+                params=qs,
+                timeout=15,
+                verify=self.verify_ssl,
+            )
             resp.raise_for_status()
             root = ET.fromstring(resp.content)
 
@@ -238,10 +245,15 @@ class NavidromeClient:
 
             # Get token via login
             login_url = f"{self.server_url}/api/login"
-            login_resp = req.post(login_url, json={
-                "username": self.username,
-                "password": self.password,
-            }, timeout=10)
+            login_resp = req.post(
+                login_url,
+                json={
+                    "username": self.username,
+                    "password": self.password,
+                },
+                timeout=10,
+                verify=self.verify_ssl,
+            )
 
             if login_resp.status_code != 200:
                 logger.debug(f"Native API login failed: {login_resp.status_code}")
@@ -253,7 +265,12 @@ class NavidromeClient:
 
             # Get song details including playlists
             song_url = f"{self.server_url}/api/song/{song_id}"
-            resp = req.get(song_url, headers={"Authorization": f"Bearer {token}"}, timeout=10)
+            resp = req.get(
+                song_url,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10,
+                verify=self.verify_ssl,
+            )
 
             if resp.status_code != 200:
                 logger.debug(f"Native API getSong failed: {resp.status_code}")
@@ -276,14 +293,23 @@ class NavidromeClient:
         try:
             import requests as req
             login_url = f"{self.server_url}/api/login"
-            resp = req.post(login_url, json={
-                "username": self.username,
-                "password": self.password,
-            }, timeout=10)
+            resp = req.post(
+                login_url,
+                json={
+                    "username": self.username,
+                    "password": self.password,
+                },
+                timeout=10,
+                verify=self.verify_ssl,
+            )
             if resp.status_code == 200:
                 return resp.json().get("token", "")
-        except Exception as e:
-            logger.debug(f"Native API login error: {e}")
+            logger.warning(
+                f"  Native API login failed: HTTP {resp.status_code} "
+                f"(response: {resp.text[:200]})"
+            )
+        except requests.RequestException as e:
+            logger.warning(f"  Native API login error: {e}")
         return None
 
     def get_library_index(self):
@@ -303,7 +329,7 @@ class NavidromeClient:
 
         token = self._get_native_token()
         if not token:
-            logger.debug("Cannot authenticate with native Navidrome API for library index")
+            logger.warning("Cannot authenticate with native Navidrome API for library index")
             return []
 
         headers = {"Authorization": f"Bearer {token}"}
@@ -312,9 +338,17 @@ class NavidromeClient:
 
         # --- Step 1: Fetch folder tree and collect album IDs ---
         try:
-            resp = req.get(f"{self.server_url}/api/folders", headers=headers, timeout=30)
+            resp = req.get(
+                f"{self.server_url}/api/folders",
+                headers=headers,
+                timeout=30,
+                verify=self.verify_ssl,
+            )
             if resp.status_code != 200:
-                logger.debug(f"Native API /api/folders failed: {resp.status_code}")
+                logger.warning(
+                    f"  Native API /api/folders failed: HTTP {resp.status_code} "
+                    f"(response: {resp.text[:200]})"
+                )
                 return []
 
             folders = resp.json().get("data", [])
@@ -337,7 +371,7 @@ class NavidromeClient:
             logger.info(f"  Native API: found {len(folders)} media folder(s), {len(seen_album_ids)} album(s)")
 
         except Exception as e:
-            logger.debug(f"Error collecting album IDs from folder tree: {e}")
+            logger.warning(f"  Error collecting album IDs from folder tree: {e}")
             return []
 
         # --- Step 2: Fetch each album's songs ---
@@ -345,7 +379,12 @@ class NavidromeClient:
         for album_id in seen_album_ids:
             try:
                 album_url = f"{self.server_url}/api/album/{album_id}"
-                aresp = req.get(album_url, headers=headers, timeout=15)
+                aresp = req.get(
+                    album_url,
+                    headers=headers,
+                    timeout=15,
+                    verify=self.verify_ssl,
+                )
                 if aresp.status_code != 200:
                     errors += 1
                     if errors < 5:
@@ -372,4 +411,105 @@ class NavidromeClient:
                     logger.debug(f"  Error fetching album {album_id}: {e}")
 
         logger.info(f"  Native API: built index with {len(all_songs)} songs from {len(seen_album_ids)} albums")
+        return all_songs
+
+    # ------------------------------------------------------------------ #
+    #  Library index via Subsonic API (fallback)
+    # ------------------------------------------------------------------ #
+
+    def get_library_index_subsonic(self):
+        """
+        Build an in-memory index of ALL songs in Navidrome's library
+        using the Subsonic API (/rest) as fallback for native API.
+
+        Strategy:
+        1. getMusicFolders -> get media folder IDs
+        2. getSongList -> get all songs per folder (sorted by lastFM or random for scan)
+        3. Parse results into {id, title, artist, album, duration, isrc}
+
+        This uses the same auth mechanism as ping(), so it works with self-signed certs
+        when verify_ssl=False.
+
+        Returns list of song dicts.
+        """
+        all_songs = []
+
+        # Step 1: Get music folders
+        root = self._api_call("getMusicFolders")
+        if root is None:
+            logger.warning("  Subsonic fallback: getMusicFolders returned no data")
+            return []
+
+        ns = root.tag.split("}")[0].rstrip("{") if "}" in root.tag else ""
+        if ns:
+            ns = f"{{{ns}}}"
+
+        music_folders = root.findall(f"{ns}musicFolder")
+        if not music_folders:
+            logger.warning("  Subsonic fallback: no music folders found")
+            return []
+
+        logger.info(
+            f"  Subsonic fallback: found {len(music_folders)} music folder(s)"
+        )
+
+        # Step 2: For each folder, enumerate children recursively and collect songs
+        for mf in music_folders:
+            mf_id = mf.get("id")
+            if not mf_id:
+                continue
+            songs = self._get_children_songs(mf_id, ns, depth=0)
+            all_songs.extend(songs)
+
+        logger.info(
+            f"  Subsonic fallback: built index with {len(all_songs)} songs "
+            f"from {len(music_folders)} folder(s)"
+        )
+        return all_songs
+
+    def _get_children_songs(self, parent_id, ns, depth=0):
+        """
+        Recursively get all songs under a folder/artist/album.
+        Returns list of song dicts.
+        """
+        if depth > 10:
+            return []
+
+        all_songs = []
+        # Use large page size for efficiency
+        page_size = 500
+        offset = 0
+
+        while True:
+            root = self._api_call(
+                "getChildren",
+                {"id": parent_id, "offset": str(offset), "size": str(page_size)},
+            )
+            if root is None:
+                break
+
+            children = root.findall(f"{ns}child")
+            if not children:
+                break
+
+            for child in children:
+                child_type = child.get("type")
+                child_id = child.get("id")
+                if child_type == "song":
+                    # Parse song directly
+                    song_data = self._parse_song(child, ns=ns)
+                    song_data["id"] = child_id
+                    all_songs.append(song_data)
+                elif child_type in ("album", "artist"):
+                    # Recurse into child
+                    sub_songs = self._get_children_songs(
+                        child_id, ns, depth + 1
+                    )
+                    all_songs.extend(sub_songs)
+                # Ignore directories and playlists
+
+            if len(children) < page_size:
+                break
+            offset += page_size
+
         return all_songs
