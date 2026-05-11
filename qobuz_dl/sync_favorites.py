@@ -589,17 +589,12 @@ def _sync_stars_to_navidrome(nd_url, nd_user, nd_pass, remote_ids,
         logger.error(f"  {RED}[-] Cannot reach Navidrome. Skipping star sync.{OFF}")
         return
 
-    # --- Build full library index from Navidrome ---
-    logger.info(f"  Building Navidrome library index (native API)...")
+    # --- Build full library index from Navidrome (Subsonic REST) ---
+    logger.info(f"  Building Navidrome library index (Subsonic REST)...")
     library_index = nd.get_library_index()
     if not library_index:
-        logger.warning(f"  {YELLOW}[!] Native API library index empty. Trying Subsonic fallback...{OFF}")
-        library_index = nd.get_library_index_subsonic()
-        if not library_index:
-            logger.warning(f"  {YELLOW}[!] Subsonic library index also empty. Falling back to search3 only.{OFF}")
-            library_index = None
-        else:
-            logger.info(f"  Subsonic fallback: {len(library_index)} tracks indexed")
+        logger.warning(f"  {YELLOW}[!] Library index empty. Falling back to search3 only.{OFF}")
+        library_index = None
     else:
         logger.info(f"  Index built: {len(library_index)} tracks indexed")
 

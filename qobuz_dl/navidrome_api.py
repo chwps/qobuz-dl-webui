@@ -1,9 +1,8 @@
 """
-Navidrome Subsonic API client.
-Handles track search, star/unstar operations, and starred tracks listing
-for favorites synchronization.
-
-Uses standard Subsonic auth: username + password sent with every request.
+Navidrome Subsonic REST API client.
+Uses ONLY the Subsonic /rest/* endpoints — no native /api/ calls.
+Handles track search, star/unstar operations, starred tracks listing,
+library indexing, and playlist lookup for favorites synchronization.
 """
 
 import logging
@@ -16,14 +15,12 @@ logger = logging.getLogger(__name__)
 
 
 class NavidromeClient:
-    """Client for Navidrome's Subsonic-compatible API."""
+    """Client for Navidrome's Subsonic-compatible REST API."""
 
     def __init__(self, server_url, username, password, verify_ssl=True):
         """
-        Initialize the Navidrome client.
-
         Args:
-            server_url: Base URL of Navidrome (e.g. 'http://localhost:4533')
+            server_url: Base URL (e.g. 'http://192.168.1.22:4533')
             username: Navidrome username
             password: Navidrome password
             verify_ssl: Whether to verify SSL certificates (default: True)
@@ -35,14 +32,13 @@ class NavidromeClient:
         self.verify_ssl = verify_ssl
 
     # ------------------------------------------------------------------ #
-    #  Core HTTP helper
+    #  Core HTTP helper — all Subsonic /rest/ calls go through here
     # ------------------------------------------------------------------ #
 
     def _api_call(self, endpoint, params=None):
         """
-        Make an authenticated API call to Navidrome.
-
-        Every request carries v, c, u, p (Subsonic standard).
+        Make an authenticated Subsonic REST call.
+        Every request carries v, c, u, p via requests.params (URL-encoded).
 
         Returns the parsed XML root element, or None on failure.
         """
@@ -56,22 +52,20 @@ class NavidromeClient:
             qs.update(params)
 
         try:
-            resp = requests.get(
-                f"{self.api_url}/{endpoint}",
-                params=qs,
-                timeout=15,
-                verify=self.verify_ssl,
-            )
+            url = f"{self.api_url}/{endpoint}"
+            resp = requests.get(url, params=qs, timeout=15, verify=self.verify_ssl)
             resp.raise_for_status()
             root = ET.fromstring(resp.content)
 
-            # Check for Subsonic error wrapper
             status = root.get("status")
             if status != "ok":
                 error = root.find("error")
                 msg = error.text if error is not None else "unknown"
                 code = error.get("code", "?") if error is not None else "?"
-                logger.debug(f"Navidrome API {endpoint} returned error {code}: {msg}")
+                logger.error(
+                    f"{RED}[-] Navidrome API {endpoint} error {code}: {msg}"
+                    f" (full: {resp.text[:200]}){OFF}"
+                )
                 return None
 
             return root
@@ -79,8 +73,23 @@ class NavidromeClient:
             logger.error(f"{RED}[-] Navidrome API error ({endpoint}): {e}{OFF}")
             return None
         except ET.ParseError as e:
-            logger.error(f"{RED}[-] Navidrome XML parse error ({endpoint}): {e}{OFF}")
+            logger.error(
+                f"{RED}[-] Navidrome XML parse error ({endpoint}): {e}"
+                f" (body: {resp.text[:200]}){OFF}"
+            )
             return None
+
+    # ------------------------------------------------------------------ #
+    #  Namespace helper
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _get_ns(root):
+        """Extract namespace prefix from root tag, e.g. '{http://subsonic.org/restapi}'."""
+        if "}" in root.tag:
+            ns = root.tag.split("}")[0] + "}"
+            return ns
+        return ""
 
     # ------------------------------------------------------------------ #
     #  Connection test
@@ -96,7 +105,7 @@ class NavidromeClient:
         return False
 
     # ------------------------------------------------------------------ #
-    #  Search
+    #  Song parsing
     # ------------------------------------------------------------------ #
 
     @staticmethod
@@ -107,15 +116,17 @@ class NavidromeClient:
             el = song_elem.find(f"{ns}{key}")
             track[key] = el.text if el is not None and el.text else ""
 
-        # Numeric duration
         dur_el = song_elem.find(f"{ns}durationSec")
         track["duration"] = int(dur_el.text) if dur_el is not None and dur_el.text else 0
 
-        # ISRC (often present)
         isrc_el = song_elem.find(f"{ns}isrc")
         track["isrc"] = isrc_el.text if isrc_el is not None and isrc_el.text else ""
 
         return track
+
+    # ------------------------------------------------------------------ #
+    #  Search
+    # ------------------------------------------------------------------ #
 
     def search_track(self, query, artist=None, limit=20):
         """
@@ -132,16 +143,11 @@ class NavidromeClient:
         if artist:
             query = f"{artist} {query}"
 
-        # Use search3 endpoint (Navidrome 0.61.x uses search3, not getSearch3)
         root = self._api_call("search3", {"query": query, "limit": str(limit)})
         if root is None:
             return []
 
-        # Navidrome XML uses namespace http://subsonic.org/restapi
-        ns = root.tag.split("}")[0].rstrip("{") if "}" in root.tag else ""
-        if ns:
-            ns = f"{{{ns}}}"
-
+        ns = self._get_ns(root)
         container = root.find(f"{ns}searchResult3")
         if container is None:
             return []
@@ -155,25 +161,20 @@ class NavidromeClient:
     def star_track(self, song_id):
         """Star (favorite) a track. Returns True on success."""
         root = self._api_call("star", {"id": song_id})
-        if root is not None:
-            return True
-        return False
+        return root is not None
 
     def unstar_track(self, song_id):
         """Remove star (unfavorite) a track. Returns True on success."""
         root = self._api_call("unstar", {"id": song_id})
-        if root is not None:
-            return True
-        return False
+        return root is not None
 
     # ------------------------------------------------------------------ #
-    #  Starred list
+    #  Starred list (getStarred2)
     # ------------------------------------------------------------------ #
 
     def get_starred_tracks(self, offset=0, size=500):
         """
         Get all starred (favorited) tracks from Navidrome.
-
         Returns list of dicts with at least {'id', 'title', 'artist', 'album'}.
         """
         all_tracks = []
@@ -188,21 +189,24 @@ class NavidromeClient:
             if root is None:
                 break
 
-            starred_list = root.find("starred2List")
+            ns = self._get_ns(root)
+
+            # Navidrome wraps in <starred2List>
+            starred_list = root.find(f"{ns}starred2List")
             if starred_list is None:
                 break
 
-            entries = starred_list.findall("entry")
+            entries = starred_list.findall(f"{ns}entry")
             if not entries:
                 break
 
             for entry in entries:
-                ss = entry.find("starredSong")
+                ss = entry.find(f"{ns}starredSong")
                 if ss is None:
                     continue
                 track = {"id": ss.get("id", "")}
                 for key in ["title", "artist", "album"]:
-                    el = ss.find(key)
+                    el = ss.find(f"{ns}{key}")
                     track[key] = el.text if el is not None and el.text else ""
                 all_tracks.append(track)
 
@@ -221,248 +225,91 @@ class NavidromeClient:
         root = self._api_call("getSong", {"id": song_id})
         if root is None:
             return None
-        song = root.find("song")
+        ns = self._get_ns(root)
+        song = root.find(f"{ns}song")
         if song is None:
             return None
-        return self._parse_song(song)
+        return self._parse_song(song, ns=ns)
 
     # ------------------------------------------------------------------ #
-    #  Playlist lookup for a song
+    #  Playlist lookup for a song (Subsonic REST only)
     # ------------------------------------------------------------------ #
 
     def get_playlists_for_song(self, song_id):
         """
         Get the list of playlists containing a given song.
-
-        Uses the native Navidrome API /api/song/{id} which returns
-        playlist associations. Falls back to Subsonic API if needed.
+        Uses Subsonic REST getPlaylists endpoint.
 
         Returns list of playlist names, or empty list.
         """
-        # Try native Navidrome API first
-        try:
-            import requests as req
-
-            # Get token via login
-            login_url = f"{self.server_url}/api/login"
-            login_resp = req.post(
-                login_url,
-                json={
-                    "username": self.username,
-                    "password": self.password,
-                },
-                timeout=10,
-                verify=self.verify_ssl,
-            )
-
-            if login_resp.status_code != 200:
-                logger.debug(f"Native API login failed: {login_resp.status_code}")
-                return []
-
-            token = login_resp.json().get("token", "")
-            if not token:
-                return []
-
-            # Get song details including playlists
-            song_url = f"{self.server_url}/api/song/{song_id}"
-            resp = req.get(
-                song_url,
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=10,
-                verify=self.verify_ssl,
-            )
-
-            if resp.status_code != 200:
-                logger.debug(f"Native API getSong failed: {resp.status_code}")
-                return []
-
-            data = resp.json().get("data", {})
-            playlists = data.get("playlists", [])
-            return [pl.get("name", "Unknown") for pl in playlists]
-
-        except Exception as e:
-            logger.debug(f"Failed to get playlists for song {song_id}: {e}")
+        root = self._api_call("getPlaylists")
+        if root is None:
             return []
 
-    # ------------------------------------------------------------------ #
-    #  Library index (native API)
-    # ------------------------------------------------------------------ #
+        ns = self._get_ns(root)
+        playlists_elem = root.find(f"{ns}playlists")
+        if playlists_elem is None:
+            return []
 
-    def _get_native_token(self):
-        """Authenticate via native API and return Bearer token, or None."""
-        try:
-            import requests as req
-            login_url = f"{self.server_url}/api/login"
-            resp = req.post(
-                login_url,
-                json={
-                    "username": self.username,
-                    "password": self.password,
-                },
-                timeout=10,
-                verify=self.verify_ssl,
-            )
-            if resp.status_code == 200:
-                return resp.json().get("token", "")
-            logger.warning(
-                f"  Native API login failed: HTTP {resp.status_code} "
-                f"(response: {resp.text[:200]})"
-            )
-        except requests.RequestException as e:
-            logger.warning(f"  Native API login error: {e}")
-        return None
+        matching = []
+        for pl in playlists_elem.findall(f"{ns}playlist"):
+            entries = pl.findall(f"{ns}entry")
+            for entry in entries:
+                eid = entry.get("songId", "")
+                if eid == song_id:
+                    name_el = pl.find(f"{ns}name")
+                    name = name_el.text if name_el is not None and name_el.text else "Unknown"
+                    matching.append(name)
+                    break
+
+        return matching
+
+    # ------------------------------------------------------------------ #
+    #  Library index — Subsonic REST only
+    # ------------------------------------------------------------------ #
 
     def get_library_index(self):
         """
         Build an in-memory index of ALL songs in Navidrome's library
-        using the native API (/api/folders + /api/album/{id}).
-
-        Strategy:
-        1. GET /api/folders to get the folder tree (includes album IDs)
-        2. Recursively walk the tree collecting all album IDs
-        3. GET /api/album/{id} for each album to get its songs
+        using ONLY Subsonic REST API:
+          1. getMusicFolders -> get media folder IDs
+          2. getChildren (recursive) -> collect all songs
 
         Returns a list of dicts with keys:
             id, title, artist, album, duration, isrc
-        """
-        import requests as req
-
-        token = self._get_native_token()
-        if not token:
-            logger.warning("Cannot authenticate with native Navidrome API for library index")
-            return []
-
-        headers = {"Authorization": f"Bearer {token}"}
-        all_songs = []
-        seen_album_ids = set()
-
-        # --- Step 1: Fetch folder tree and collect album IDs ---
-        try:
-            resp = req.get(
-                f"{self.server_url}/api/folders",
-                headers=headers,
-                timeout=30,
-                verify=self.verify_ssl,
-            )
-            if resp.status_code != 200:
-                logger.warning(
-                    f"  Native API /api/folders failed: HTTP {resp.status_code} "
-                    f"(response: {resp.text[:200]})"
-                )
-                return []
-
-            folders = resp.json().get("data", [])
-
-            # Recursive function to walk folder tree and collect album IDs
-            def collect_album_ids(node, depth=0):
-                if depth > 20:
-                    return
-                for child in node.get("children", []):
-                    child_type = child.get("type", "")
-                    child_id = child.get("id", "")
-                    if child_type == "album" and child_id:
-                        seen_album_ids.add(child_id)
-                    elif child_type == "folder":
-                        collect_album_ids(child, depth + 1)
-
-            for folder in folders:
-                collect_album_ids(folder)
-
-            logger.info(f"  Native API: found {len(folders)} media folder(s), {len(seen_album_ids)} album(s)")
-
-        except Exception as e:
-            logger.warning(f"  Error collecting album IDs from folder tree: {e}")
-            return []
-
-        # --- Step 2: Fetch each album's songs ---
-        errors = 0
-        for album_id in seen_album_ids:
-            try:
-                album_url = f"{self.server_url}/api/album/{album_id}"
-                aresp = req.get(
-                    album_url,
-                    headers=headers,
-                    timeout=15,
-                    verify=self.verify_ssl,
-                )
-                if aresp.status_code != 200:
-                    errors += 1
-                    if errors < 5:
-                        logger.debug(f"  Album {album_id}: HTTP {aresp.status_code}")
-                    continue
-
-                album_data = aresp.json().get("data", {})
-                album_name = album_data.get("name", "")
-                songs = album_data.get("songs", [])
-
-                for s in songs:
-                    all_songs.append({
-                        "id": s.get("id", ""),
-                        "title": s.get("title", ""),
-                        "artist": s.get("artistName", s.get("artist", "")),
-                        "album": album_name or s.get("albumName", ""),
-                        "duration": int(s.get("duration", 0)) if s.get("duration") else 0,
-                        "isrc": s.get("isrc", ""),
-                    })
-
-            except Exception as e:
-                errors += 1
-                if errors <= 3:
-                    logger.debug(f"  Error fetching album {album_id}: {e}")
-
-        logger.info(f"  Native API: built index with {len(all_songs)} songs from {len(seen_album_ids)} albums")
-        return all_songs
-
-    # ------------------------------------------------------------------ #
-    #  Library index via Subsonic API (fallback)
-    # ------------------------------------------------------------------ #
-
-    def get_library_index_subsonic(self):
-        """
-        Build an in-memory index of ALL songs in Navidrome's library
-        using the Subsonic API (/rest) as fallback for native API.
-
-        Strategy:
-        1. getMusicFolders -> get media folder IDs
-        2. getSongList -> get all songs per folder (sorted by lastFM or random for scan)
-        3. Parse results into {id, title, artist, album, duration, isrc}
-
-        This uses the same auth mechanism as ping(), so it works with self-signed certs
-        when verify_ssl=False.
-
-        Returns list of song dicts.
         """
         all_songs = []
 
         # Step 1: Get music folders
         root = self._api_call("getMusicFolders")
         if root is None:
-            logger.warning("  Subsonic fallback: getMusicFolders returned no data")
+            logger.warning("  Subsonic: getMusicFolders returned no data")
             return []
 
-        ns = root.tag.split("}")[0].rstrip("{") if "}" in root.tag else ""
-        if ns:
-            ns = f"{{{ns}}}"
-
+        ns = self._get_ns(root)
         music_folders = root.findall(f"{ns}musicFolder")
         if not music_folders:
-            logger.warning("  Subsonic fallback: no music folders found")
+            raw = ET.tostring(root, encoding="unicode")
+            logger.warning(
+                f"  Subsonic: getMusicFolders returned OK but no <musicFolder> elements. "
+                f"Raw response: {raw[:300]}"
+            )
             return []
 
-        logger.info(
-            f"  Subsonic fallback: found {len(music_folders)} music folder(s)"
-        )
+        logger.info(f"  Subsonic: found {len(music_folders)} music folder(s)")
 
-        # Step 2: For each folder, enumerate children recursively and collect songs
+        # Step 2: For each folder, enumerate children recursively
         for mf in music_folders:
             mf_id = mf.get("id")
+            mf_name = mf.get("name", "unknown")
             if not mf_id:
                 continue
             songs = self._get_children_songs(mf_id, ns, depth=0)
+            logger.info(f"    Folder '{mf_name}' ({mf_id}): {len(songs)} songs")
             all_songs.extend(songs)
 
         logger.info(
-            f"  Subsonic fallback: built index with {len(all_songs)} songs "
+            f"  Subsonic: built index with {len(all_songs)} songs "
             f"from {len(music_folders)} folder(s)"
         )
         return all_songs
@@ -476,7 +323,6 @@ class NavidromeClient:
             return []
 
         all_songs = []
-        # Use large page size for efficiency
         page_size = 500
         offset = 0
 
@@ -496,15 +342,11 @@ class NavidromeClient:
                 child_type = child.get("type")
                 child_id = child.get("id")
                 if child_type == "song":
-                    # Parse song directly
                     song_data = self._parse_song(child, ns=ns)
                     song_data["id"] = child_id
                     all_songs.append(song_data)
                 elif child_type in ("album", "artist"):
-                    # Recurse into child
-                    sub_songs = self._get_children_songs(
-                        child_id, ns, depth + 1
-                    )
+                    sub_songs = self._get_children_songs(child_id, ns, depth + 1)
                     all_songs.extend(sub_songs)
                 # Ignore directories and playlists
 
@@ -513,3 +355,11 @@ class NavidromeClient:
             offset += page_size
 
         return all_songs
+
+    # ------------------------------------------------------------------ #
+    #  Deprecated — alias kept for backward compat
+    # ------------------------------------------------------------------ #
+
+    def get_library_index_subsonic(self):
+        """Alias for get_library_index (Subsonic-only)."""
+        return self.get_library_index()
