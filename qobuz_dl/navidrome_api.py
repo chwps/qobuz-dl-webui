@@ -261,6 +261,76 @@ class NavidromeClient:
         return matching
 
     # ------------------------------------------------------------------ #
+    #  Get all playlists / Get playlist by name
+    # ------------------------------------------------------------------ #
+
+    def get_playlists(self):
+        """
+        Get all playlists with their entries.
+        Uses Subsonic REST getPlaylists endpoint.
+
+        Returns list of dicts:
+            [{'id': playlist_id, 'name': playlist_name,
+              'entries': [{'songId': song_id, 'songTitle': ..., 'songAlbum': ..., 'songArtist': ...}, ...]}, ...]
+        """
+        root = self._api_call("getPlaylists")
+        if root is None:
+            return []
+
+        playlists_elem = root.find("playlists")
+        if playlists_elem is None:
+            return []
+
+        result = []
+        for pl in playlists_elem.findall("playlist"):
+            name_el = pl.find("name")
+            pl_name = name_el.text if name_el is not None and name_el.text else "Unknown"
+            pl_id = pl.get("id", "")
+
+            entries = []
+            for entry in pl.findall("entry"):
+                entries.append({
+                    "songId": entry.get("songId", ""),
+                    "songTitle": entry.get("songTitle", ""),
+                    "songAlbum": entry.get("songAlbum", ""),
+                    "songArtist": entry.get("songArtist", ""),
+                })
+
+            result.append({
+                "id": pl_id,
+                "name": pl_name,
+                "entries": entries,
+            })
+
+        return result
+
+    def get_playlist_by_name(self, name_pattern):
+        """
+        Find a playlist by name (partial match) and return its song IDs.
+
+        Args:
+            name_pattern: String to match against playlist names (case-insensitive partial match)
+
+        Returns:
+            List of song IDs, or empty list if not found.
+        """
+        playlists = self.get_playlists()
+        pattern_lower = name_pattern.lower()
+
+        for pl in playlists:
+            if pattern_lower in pl["name"].lower():
+                logger.info(
+                    f"  Found playlist '{pl['name']}' with {len(pl['entries'])} tracks (id={pl['id']})"
+                )
+                return [e["songId"] for e in pl["entries"] if e.get("songId")]
+
+        logger.warning(f"  Playlist matching '{name_pattern}' not found in Navidrome")
+        if playlists:
+            names = [p["name"] for p in playlists[:10]]
+            logger.info(f"  Available playlists: {names}")
+        return []
+
+    # ------------------------------------------------------------------ #
     #  Library index — Subsonic REST only
     # ------------------------------------------------------------------ #
 

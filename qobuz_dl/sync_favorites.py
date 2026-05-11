@@ -571,12 +571,16 @@ def _sync_stars_to_navidrome(nd_url, nd_user, nd_pass, remote_ids,
                               local_tracks, base_directory, enable_sync=True,
                               verify_ssl=True):
     """
-    Sync Qobuz favorites status to Navidrome star status.
+    Sync Qobuz favorites to Navidrome star status via the M3U playlist.
 
-    Strategy:
-    1. Build a full in-memory index of Navidrome library via native API
-    2. For each Qobuz favorite, find matching Navidrome track using the index
-    3. Star the matched track in Navidrome
+    SIMPLE APPROACH:
+    The favorites sync creates an M3U file 'Mes Favoris Qobuz.m3u' in _Playlists/.
+    Navidrome auto-imports this as a playlist. We simply:
+    1. Find that playlist in Navidrome by name
+    2. Get all song IDs from the playlist
+    3. Star each song directly
+
+    No fuzzy matching, no full library index, no ISRC lookups.
     """
     if not enable_sync or not nd_url or not nd_user or not nd_pass:
         logger.info(f"  {YELLOW}[!] Navidrome sync disabled (no URL/user/pass configured){OFF}")
@@ -589,16 +593,24 @@ def _sync_stars_to_navidrome(nd_url, nd_user, nd_pass, remote_ids,
         logger.error(f"  {RED}[-] Cannot reach Navidrome. Skipping star sync.{OFF}")
         return
 
-    # --- Build full library index from Navidrome (Subsonic REST) ---
-    logger.info(f"  Building Navidrome library index (Subsonic REST)...")
-    library_index = nd.get_library_index()
-    if not library_index:
-        logger.warning(f"  {YELLOW}[!] Library index empty. Falling back to search3 only.{OFF}")
-        library_index = None
-    else:
-        logger.info(f"  Index built: {len(library_index)} tracks indexed")
+    # --- Find the favorites playlist in Navidrome ---
+    logger.info(f"  Looking for Qobuz favorites playlist in Navidrome...")
+    fav_playlist_name = "Mes Favoris Qobuz"
 
-    # --- Fetch current starred tracks ---
+    playlist_song_ids = nd.get_playlist_by_name(fav_playlist_name)
+
+    if not playlist_song_ids:
+        logger.warning(f"  {YELLOW}[!] Playlist '{fav_playlist_name}' not found in Navidrome.{OFF}")
+        logger.info(f"  {YELLOW}    Possible causes:{OFF}")
+        logger.info(f"  {YELLOW}    - The M3U file has not been created yet (run favorites sync first){OFF}")
+        logger.info(f"  {YELLOW}    - Navidrome has not scanned _Playlists/ folder yet{OFF}")
+        logger.info(f"  {YELLOW}    - The M3U file is not in Navidrome's music folder path{OFF}")
+        logger.info(f"  {YELLOW}    - Trigger a library scan in Navidrome settings{OFF}")
+        return
+
+    logger.info(f"  {GREEN}  Found {len(playlist_song_ids)} tracks in playlist '{fav_playlist_name}'{OFF}")
+
+    # --- Get currently starred tracks ---
     logger.info(f"  Fetching current starred tracks from Navidrome...")
     try:
         nd_starred = nd.get_starred_tracks()
@@ -606,60 +618,32 @@ def _sync_stars_to_navidrome(nd_url, nd_user, nd_pass, remote_ids,
         logger.error(f"  {RED}[-] Failed to fetch starred tracks: {e}{OFF}")
         return
 
-    logger.info(f"  Found {len(nd_starred)} starred tracks in Navidrome.")
-    logger.info(f"  Matching {len(remote_ids)} Qobuz favorites against index...")
-
-    # --- Build set of already-starred IDs for quick lookup ---
     already_starred_ids = {t["id"] for t in nd_starred if t.get("id")}
+    logger.info(f"  Found {len(already_starred_ids)} already-starred tracks in Navidrome.")
+
+    # --- Star all tracks from the playlist ---
+    playlist_ids_set = set(playlist_song_ids)
+    to_star = [sid for sid in playlist_song_ids if sid not in already_starred_ids]
+    already_starred_from_pl = len(playlist_ids_set & already_starred_ids)
+    logger.info(f"  {GREEN}  Starring {len(to_star)} tracks ({already_starred_from_pl} already starred){OFF}")
 
     starred_count = 0
-    already_starred_count = 0
-    matched_count = 0
-    not_found_count = 0
+    failed_count = 0
 
-    for qid, item in remote_ids.items():
-        title = item.get("title", "")
-        performer = item.get("performer", {}).get("name", "")
-
-        local_path = local_tracks.get(qid)
-        local_tags = None
-        if local_path:
-            local_tags = _read_track_tags(local_path)
-
-        # Find Navidrome song ID using the pre-built index
-        nd_song_id = _find_navidrome_track(nd, item, local_tags, library_index=library_index)
-
-        if nd_song_id:
-            matched_count += 1
-            # Skip if already starred
-            if nd_song_id in already_starred_ids:
-                already_starred_count += 1
-                continue
-            if nd.star_track(nd_song_id):
-                starred_count += 1
-                already_starred_ids.add(nd_song_id)
-            else:
-                logger.debug(f"    Failed to star: {title}")
+    for i, song_id in enumerate(to_star, 1):
+        if nd.star_track(song_id):
+            starred_count += 1
         else:
-            not_found_count += 1
-            if not_found_count <= 10:
-                logger.info(f"    Not found in Navidrome: {performer} - {title}")
+            failed_count += 1
+            logger.debug(f"    Failed to star track id={song_id}")
 
+        # Progress every 25 tracks
+        if i % 25 == 0 or i == len(to_star):
+            logger.info(f"    Progress: {i}/{len(to_star)} done ({starred_count} ok, {failed_count} failed)")
+
+    # --- Summary ---
     logger.info(f"")
-    logger.info(f"  {GREEN}  Matched {matched_count} tracks in Navidrome library{OFF}")
-    if already_starred_count:
-        logger.info(f"  {YELLOW}  Already starred (skipped): {already_starred_count}{OFF}")
-    if not_found_count:
-        logger.info(f"  {YELLOW}  {not_found_count} tracks not found in Navidrome (not downloaded yet){OFF}")
-
-    if matched_count == 0 and not_found_count > 0:
-        logger.info(f"  {YELLOW}[!] No matches found in Navidrome.{OFF}")
-        logger.info(f"  {YELLOW}    Possible causes:{OFF}")
-        logger.info(f"  {YELLOW}    - Navidrome has not scanned the folder yet{OFF}")
-        logger.info(f"  {YELLOW}    - Music folder path differs between container and Navidrome config{OFF}")
-        logger.info(f"  {YELLOW}    - SSL certificate verification failed (try verify_ssl=false){OFF}")
-        logger.info(f"  {YELLOW}    - Navidrome user lacks read permissions on music folder{OFF}")
-        logger.info(f"  {YELLOW}    - Trigger a library scan in Navidrome settings{OFF}")
-
     logger.info(f"  {GREEN}  Starred {starred_count} new tracks in Navidrome{OFF}")
+    if failed_count:
+        logger.info(f"  {YELLOW}  Failed to star: {failed_count} tracks{OFF}")
     logger.info(f"  {YELLOW}  Note: Unstar (remove favorites) is disabled to prevent accidental removal.{OFF}")
