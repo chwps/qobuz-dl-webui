@@ -68,6 +68,9 @@ services:
       # - SYNC_NAVI_USER=admin
       # - SYNC_NAVI_PASS=your_password
 
+      # Disable SSL certificate verification (for self-signed certificates)
+      # - SYNC_NAVI_VERIFY_SSL=false
+
     volumes:
       # Persist the config file (created on first run with 'qobuz-dl -r')
       # IMPORTANT: adapter ces chemins a ton pool TrueNAS
