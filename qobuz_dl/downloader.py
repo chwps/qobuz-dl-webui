@@ -1047,14 +1047,18 @@ def tqdm_download(url_or_callable, fname, track_name, is_parallel=False):
                 safe_print(f"{G}  L Completed: {track_name}{O}")
                 return 
 
-        except Exception:
+        except Exception as e:
+            if "404" in str(e):
+                if os.path.exists(fname): os.remove(fname)
+                raise Exception("HTTP 404: File not found on server.")
+                        
             if attempt < max_retries - 1:
                 wait = backoff_delays[attempt]
-                safe_print(f"\n{Y}[!] Server block. Retrying in {wait}s ({attempt+1}/{max_retries})...{O}")
+                safe_print(f"\n{Y}[!] Server block. Retrying in {wait}s ({attempt+1}/{max_retries}) | Error details: {e}{O}")
                 time.sleep(wait)
             else:
                 if os.path.exists(fname): os.remove(fname)
-                raise Exception("Definitive timeout")
+                raise Exception(f"Definitive timeout after {max_retries} attempts. Last error: {e}")
 
     if downloaded_size < total_size and not abort_event.is_set():
         if os.path.exists(fname): os.remove(fname)
@@ -1079,7 +1083,11 @@ def _get_extra(item, dirn, extra="cover.jpg", art_size=None, og_quality=False):
     if art_size in ["50", "100", "150", "300", "600", "max", "org"]:
         item = item.replace("_600.", f"_{art_size}.")
         
-    tqdm_download(item, extra_file, extra, is_parallel=False)
+    try:
+        tqdm_download(item, extra_file, extra, is_parallel=False)
+    except Exception as e:
+        from qobuz_dl.color import YELLOW, OFF 
+        safe_print(f"  {YELLOW}[!] Skipping cover art '{extra}': URL unreachable ({e}){OFF}")
 
 def _clean_format_str(folder: str, track: str, file_format: str) -> Tuple[str, str]:
     final = []
