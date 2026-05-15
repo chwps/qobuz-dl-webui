@@ -1086,7 +1086,6 @@ def _get_extra(item, dirn, extra="cover.jpg", art_size=None, og_quality=False):
     try:
         tqdm_download(item, extra_file, extra, is_parallel=False)
     except Exception as e:
-        from qobuz_dl.color import YELLOW, OFF 
         safe_print(f"  {YELLOW}[!] Skipping cover art '{extra}': URL unreachable ({e}){OFF}")
 
 def _clean_format_str(folder: str, track: str, file_format: str) -> Tuple[str, str]:
