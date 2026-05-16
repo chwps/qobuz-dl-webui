@@ -9,9 +9,9 @@ Search, explore, and download Lossless and Hi-Res music from [Qobuz](https://www
 
 ### 🎧 Audiophile & Metadata Engine
 * **Roon & DAP Optimized:** Metadata, cover art, and lyrics are meticulously formatted to ensure perfect out-of-the-box integration with Roon servers and Digital Audio Players.
-* **Roon-Ready Synchronized Lyrics:** The engine intelligently formats and embeds timestamped `.lrc` data directly into the audio files (`[LYRICS]` Vorbis Comments), ensuring Roon natively displays scrolling, karaoke-style lyrics in its "Now Playing" view out-of-the-box. If you prefer a minimalist, clutter-free folder structure, you can disable the generation of external `.lrc` files entirely via CLI (`--no-lrc-files`) or `config.ini` (`no_lrc_files = true`), keeping your synchronized lyrics purely embedded within the metadata.
+* **Roon-Ready Synchronized Lyrics:** The engine intelligently formats and embeds timestamped `.lrc` data directly into the audio files (`[LYRICS]` Vorbis Comments), ensuring Roon natively displays scrolling, karaoke-style lyrics in its "Now Playing" view out-of-the-box. If you prefer a minimalist, clutter-free folder structure, you can disable the generation of external `.lrc` files entirely via CLI (`--no-lrc-files`). Conversely, if you prefer external files without bloating your audio metadata, use the new `--no-embed-lyrics` flag (or set `embed_lyrics = false` in your config).
 * **Massive Tag Control:** Refactored tag engine supports highly detailed classical music metadata. Almost every single tag can be toggled on/off via CLI arguments.
-* **Native Multi-Artist Tagging:** Automatically detects and splits main artists and featured guests. Unlike standard downloaders, it writes discrete multiple tags for FLAC files (Vorbis Comments) and standard null-separated strings for MP3s (ID3v2), ensuring flawless interpretation by high-end players like Roon, Plexamp, or Kodi without requiring external tools like MusicBrainz Picard.
+* **Native Multi-Artist & Multi-Value Tagging:** Automatically detects and splits main artists and featured guests. With the new `--multi-tags` CLI flag (or `multi_value_tags = true` in config), the engine also intelligently splits comma-separated metadata (like multiple genres: "Pop, Indie") into true discrete multi-value tags for FLAC (Vorbis Comments) and MP3 (ID3v2.4), ensuring flawless interpretation by high-end players like Roon, MusicBee, or Plexamp.
 * **Native ReplayGain Support:** Automatically extracts and embeds `REPLAYGAIN_TRACK_GAIN` and `REPLAYGAIN_TRACK_PEAK` tags directly from Qobuz's hidden API data. This ensures perfect, non-destructive volume leveling out-of-the-box for high-end digital audio players (DAPs) and audiophile servers like Roon.
 * **Automatic Lyrics Engine & Retroactive Tagger:** Fetches and injects synchronized (`.lrc`) and unsynchronized lyrics using LRCLIB (with a Genius fallback API). Includes a standalone `lyrics` command to retroactively scan and inject missing lyrics into your existing local library without re-downloading the audio.
 * **Enhanced Digital Booklets:** Automatically compiles a beautifully formatted `.txt` file with a complete tracklist, runtime, full credits, metadata, and reviews. Upon completion, the engine intelligently sweeps the folder, strips timestamps from `.lrc` files, and appends the pure text lyrics of the entire album directly into the booklet. Official PDF "Goodies" are also downloaded alongside it. **You can now use the `--booklet-only` flag to exclusively download these metadata files, cover art, and PDFs while gracefully skipping all heavy audio tracks.**
@@ -135,6 +135,8 @@ The fastest way to download directly to your Google Drive at Gigabit speeds, byp
 
 ### ⚙️ Configuration & Custom Paths
 If you want to set a custom download folder, you can edit your `config.ini` file and use the `directory` key. Absolute paths and the `~` operator (for macOS/Linux) are fully supported!
+
+> **💡 Tip for Upgrading Users:** To access the latest configuration options (like `embed_lyrics` and `multi_value_tags`), simply run `qobuz-dl -r` to reset and regenerate a fresh `config.ini` file, or manually append them under the `[qobuz]` section.
 ```ini
 [qobuz]
 directory = ~/Music/Qobuz_Lossless
@@ -278,13 +280,60 @@ The Ultimate Edition includes powerful local library managers to keep track of y
 
 ### 🛠️ Key Formatting Variables
 
-You can customize your `config.ini` or use the CLI flags `-ff` (Folder Format) and `-tf` (Track Format) with these powerful variables:
+You can deeply customize your `config.ini` or use the CLI flags `-ff` (Folder Format) and `-tf` (Track Format) using the variables below. You can also use the `/` character to automatically create nested subdirectories!
 
-* **Folder Pattern (`-ff`):** Supports dynamic routing with `{release_type}`, `{album_artist}`, `{year}`, `{label}`, and `{barcode}`.
-* **Track Pattern (`-tf`):** Customize filenames using `{track_number}`, `{track_title}`, `{isrc}`, and `{track_composer}`.
-* **Explicit Flag:** Use `{ExplicitFlag}` or `{explicit}` within your patterns to automatically mark parental advisory content.
+#### 📝 Complete Variables Reference Table
 
-*Detailed variable usage and examples can be found in the [Advanced Formatting & Storage](#-advanced-formatting--storage) section.*
+| Variable | Description | Example Output |
+| :--- | :--- | :--- |
+| **Artists & Composers** | | |
+| `{album_artist}` | The main artist of the album (handles compilations gracefully). | `Daft Punk` |
+| `{artist}` / `{track_artist}` | The performing artist of the specific track. | `Pharrell Williams` |
+| `{album_composer}` | The composer of the entire album/work. | `Thomas Bangalter` |
+| `{track_composer}` | The composer of the specific track. | `Guy-Manuel de Homem-Christo` |
+| **Titles & Versions** | | |
+| `{album}` / `{album_title}` | Album title (includes version like "Remastered" if present). | `Random Access Memories (Deluxe)` |
+| `{album_title_base}` | Base album title strictly *without* the version details. | `Random Access Memories` |
+| `{track_title}` / `{tracktitle}`| Track title (includes version if present). | `Get Lucky (Radio Edit)` |
+| `{track_title_base}` | Base track title strictly *without* the version details. | `Get Lucky` |
+| `{version}` / `{album_version}` | Just the version string. | `Deluxe` |
+| `{version_tag}` | Smart version tag (prepends a dash: ` - Deluxe`). Leaves no trailing spaces if empty! | ` - Deluxe` |
+| **Numbers & Dates** | | |
+| `{track_number}` | The track number (always padded with leading zero). | `08` |
+| `{disc_number}` | The disc media number (padded with leading zero). | `01` |
+| `{track_count}` | Total number of tracks in the album. | `13` |
+| `{disc_count}` | Total number of discs in the album. | `1` |
+| `{year}` | The release year. | `2013` |
+| `{release_date}` | The full original release date. | `2013-05-17` |
+| **Technical Specs** | | |
+| `{bit_depth}` | The audio bit depth. | `24` |
+| `{sampling_rate}` | The audio sampling rate in kHz. | `88.2` |
+| `{format}` | The downloaded file format. | `FLAC` |
+| **Metadata & IDs** | | |
+| `{release_type}` | Smart release type classification (`Album`, `EP`, `Single`). | `Album` |
+| `{explicit}` / `{ExplicitFlag}`| Adds an `[E]` tag if parental advisory is active (empty if clean). | `[E]` |
+| `{album_genre}` | Primary genre of the release. | `Electronic` |
+| `{label}` | The record label name. | `Columbia` |
+| `{copyright}` | Copyright string. | `℗ 2013 Daft Life` |
+| `{barcode}` / `{upc}` | The global UPC/Barcode of the release. | `888837168618` |
+| `{isrc}` | The unique ISRC identifier of the track. | `USSM11302305` |
+| `{album_id}` / `{track_id}` | Qobuz internal database IDs. | `123456789` |
+
+#### 💡 Real-World Examples
+
+**1. The "Audiophile Archive" Strategy (Nested Folders)**
+Sorts by Genre, then Artist, then Album with full technical specs:
+* `folder_format = {album_genre}/{album_artist}/{album_artist} - {album_title}{version_tag} ({year}) [{bit_depth}B-{sampling_rate}kHz]`
+* Output: `Electronic/Daft Punk/Daft Punk - Random Access Memories - Deluxe (2013) [24B-88.2kHz]`
+
+**2. The "Clean Library" Strategy (Smart Explicit/Version Tags)**
+Keeps it simple but adds `[E]` only if explicit, and versions without leaving empty dashes:
+* `folder_format = {album_artist} - {album_title_base}{version_tag} {ExplicitFlag}`
+* Output: `Eminem - The Eminem Show [E]`
+
+**3. The "Archivist" Track Strategy**
+* `track_format = {track_number} - {track_title} [{isrc}]`
+* Output: `08 - Get Lucky [USSM11302305].flac`
 
 ## 🏆 Credits
 * **[vitiko98](https://github.com/vitiko98/qobuz-dl)**: Creator of the original project.
