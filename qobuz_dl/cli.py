@@ -138,7 +138,9 @@ def _reset_config(config_file):
     config["qobuz"]["embed_art"] = "true"
     config["qobuz"]["no_cover"] = "false"
     config["qobuz"]["no_database"] = "false"
-    config["qobuz"]["no_lrc_files"] = "false"
+    config["qobuz"]["no_lrc_files"] = "true"
+    config["qobuz"]["embed_lyrics"] = "true"
+    config["qobuz"]["multi_value_tags"] = "false"
     config["qobuz"]["legacy_charmap"] = "false"
     config["qobuz"]["blacklist"] = "blacklist.txt"
 

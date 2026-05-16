@@ -208,6 +208,20 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         help="disable automatic lyrics fetching and injection for this session",
     )
     custom_parser.add_argument(
+        "--no-embed-lyrics",
+        dest="no_embed_lyrics",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="do not embed lyrics into the audio file tags (save as .lrc/.txt only)",
+    )
+    custom_parser.add_argument(
+        "--multi-tags",
+        dest="multi_value_tags",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="split comma-separated metadata (like genres) into multiple tag fields",
+    )
+    custom_parser.add_argument(
         "--booklet-only",
         action="store_true",
         help="only download the Digital Booklet and PDF Goodies (skips audio files)",

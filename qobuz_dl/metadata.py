@@ -161,6 +161,11 @@ def tag_flac(
 
     for k, v in tags.items():
         if v:
+            # --- MULTI-TAG FEATURE ---
+            if getattr(settings, 'multi_value_tags', False) and k == "GENRE" and isinstance(v, str):
+                if ", " in v:
+                    v = v.split(", ")
+            
             audio[k] = v
 
     if em_image:

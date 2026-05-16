@@ -39,6 +39,8 @@ class QobuzDLSettings:
         self.no_upc_tag = kwargs.get('no_upc_tag', False)
         self.no_isrc_tag = kwargs.get('no_isrc_tag', False)
         self.lrc_files = kwargs.get('lrc_files', True)
+        self.embed_lyrics = kwargs.get('embed_lyrics', True)
+        self.multi_value_tags = kwargs.get('multi_value_tags', False)
 
         # cover options
         self.embed_art = kwargs.get('embed_art', False)
@@ -131,6 +133,10 @@ class QobuzDLSettings:
             'user_auth_token': config.get(section, "user_auth_token", fallback=""),
         
             'lrc_files': getattr(arguments, 'lrc_files', config.getboolean(section, "lrc_files", fallback=True)),
+        
+            'embed_lyrics': False if getattr(arguments, 'no_embed_lyrics', False) else config.getboolean(section, "embed_lyrics", fallback=True),
+        
+            'multi_value_tags': getattr(arguments, 'multi_value_tags', config.getboolean(section, "multi_value_tags", fallback=False)),
         }
         
         return QobuzDLSettings(**kwargs)

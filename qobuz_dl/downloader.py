@@ -635,7 +635,8 @@ class Download:
                     artist=search_artist, 
                     track=track_title, 
                     album=search_album,
-                    save_lrc=not self.no_lrc_files
+                    save_lrc=not self.no_lrc_files,
+                    embed_lyrics=getattr(self.settings, 'embed_lyrics', True)
                 )
 
         delay_time = getattr(self.settings, 'delay', 0)

@@ -18,22 +18,21 @@ class LyricsEngine:
             # Initialize Genius in silent mode (verbose=False)
             self.genius = lyricsgenius.Genius(self.genius_token, verbose=False, remove_section_headers=True)
 
-    def fetch_and_inject(self, file_path, artist, track, album, save_lrc=True):
+    def fetch_and_inject(self, file_path, artist, track, album, save_lrc=True, embed_lyrics=True):
         """Waterfall engine: first try LRCLIB (for LRC format), then Genius."""
+        
+        if not save_lrc and not embed_lyrics:
+            return
+            
         try:
             print(f"    🔍 Searching lyrics for: {track}...")
             
-            # ATTEMPT 1: LRCLIB (Free search, priority to synchronized lyrics)
             lrclib_url = "https://lrclib.net/api/get"
-            
-            # Add an official User-Agent to avoid blocks or throttling from the API
             headers = {"User-Agent": "qobuz-dl-ultimate/1.0 (https://github.com/Sei969/qobuz-dl)"}
             
-            # Try A: Exact match (Artist + Track + Album)
             params = {"artist_name": artist, "track_name": track, "album_name": album}
             response = requests.get(lrclib_url, params=params, headers=headers, timeout=12) 
             
-            # Try B: If it fails, try again without album (often solves version/remaster issues)
             if response.status_code != 200:
                 params = {"artist_name": artist, "track_name": track}
                 response = requests.get(lrclib_url, params=params, headers=headers, timeout=12)
@@ -44,33 +43,52 @@ class LyricsEngine:
                 plain_lyrics = data.get("plainLyrics")
                 
                 if synced_lyrics:
-                    # CORRECT INJECTION: We pass the text with timestamps!
-                    self._inject_metadata(file_path, synced_lyrics)
-                    
+                    if embed_lyrics:
+                        self._inject_metadata(file_path, synced_lyrics)
                     if save_lrc:
                         self._save_lrc_file(file_path, synced_lyrics)
+                        
+                    if embed_lyrics and save_lrc:
                         print(f"    ✅ Synchronized lyrics injected and saved as .lrc!")
-                    else:
+                    elif save_lrc:
+                        print(f"    ✅ Synchronized lyrics saved as .lrc (Embedding disabled)!")
+                    elif embed_lyrics:
                         print(f"    ✅ Synchronized lyrics injected into metadata!")
                     return
+                    
                 elif plain_lyrics:
-                    # If no synchronized version exists, fallback to the static one
-                    self._inject_metadata(file_path, plain_lyrics)
-                    print(f"    ✅ Standard lyrics injected into metadata!")
+                    if embed_lyrics:
+                        self._inject_metadata(file_path, plain_lyrics)
+                    if save_lrc:
+                        self._save_lrc_file(file_path, plain_lyrics)
+
+                    if embed_lyrics and save_lrc:
+                        print(f"    ✅ Standard lyrics injected and saved as .txt!")
+                    elif save_lrc:
+                        print(f"    ✅ Standard lyrics saved as .txt (Embedding disabled)!")
+                    elif embed_lyrics:
+                        print(f"    ✅ Standard lyrics injected into metadata!")
                     return
 
-            # ATTEMPT 2: GENIUS FALLBACK (If the user provided a token)
             if self.genius:
                 song = self.genius.search_song(track, artist)
                 if song and song.lyrics:
-                    self._inject_metadata(file_path, song.lyrics)
-                    print(f"    ✅ Lyrics injected via Genius (Fallback)!")
+                    if embed_lyrics:
+                        self._inject_metadata(file_path, song.lyrics)
+                    if save_lrc:
+                        self._save_lrc_file(file_path, song.lyrics)
+                        
+                    if embed_lyrics and save_lrc:
+                        print(f"    ✅ Lyrics injected via Genius and saved!")
+                    elif save_lrc:
+                        print(f"    ✅ Lyrics saved via Genius (Embedding disabled)!")
+                    elif embed_lyrics:
+                        print(f"    ✅ Lyrics injected via Genius (Fallback)!")
                     return
 
             print(f"    ❌ No lyrics found for this track.")
 
         except Exception as e:
-            # Catch network or API errors to avoid interrupting the audio download
             print(f"    ⚠️ Error during lyrics search: {e}")
 
     def _save_lrc_file(self, audio_file_path, synced_lyrics):
