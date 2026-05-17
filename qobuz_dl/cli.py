@@ -8,6 +8,7 @@ import os
 import getpass
 import hashlib
 import signal
+import keyring
 import requests
 
 from qobuz_dl.bundle import Bundle
@@ -30,6 +31,25 @@ else:
 CONFIG_PATH = os.path.join(OS_CONFIG, "qobuz-dl")
 CONFIG_FILE = os.path.join(CONFIG_PATH, "config.ini")
 QOBUZ_DB = os.path.join(CONFIG_PATH, "qobuz_dl.db")
+
+KEYRING_SERVICE = "qobuz-dl"
+
+
+def _keyring_save(key, value):
+    if not value:
+        return False
+    try:
+        keyring.set_password(KEYRING_SERVICE, key, value)
+        return True
+    except Exception:
+        return False
+
+
+def _keyring_load(key):
+    try:
+        return keyring.get_password(KEYRING_SERVICE, key)
+    except Exception:
+        return None
 
 
 def validate_config_formats(formats_to_check):
@@ -101,9 +121,9 @@ def _reset_config(config_file):
     print(f"{YELLOW}[!] You must use your browser Auth Token (F12 > Storage > Local Storage > localuser > token).{OFF}")
     
     auth_token = input("Paste your browser token here:\n- ").strip()
-    
+
     config["qobuz"]["password"] = ""
-    config["qobuz"]["auth_token"] = auth_token
+    config["qobuz"]["auth_token"] = "" if _keyring_save("auth_token", auth_token) else auth_token
 
     fetch_lyrics = input("Do you want to automatically download and inject lyrics? (yes/no) [Default: yes]\n- ").strip().lower()
     config["qobuz"]["fetch_lyrics"] = "false" if fetch_lyrics in ['no', 'n', 'false'] else "true"
@@ -112,7 +132,7 @@ def _reset_config(config_file):
     if config["qobuz"]["fetch_lyrics"] == "true":
         print(f"{YELLOW}[!] To use Genius as a fallback, enter your API Token. Leave blank to only use LRCLIB (Free/No API).{OFF}")
         genius_token = input("Genius API Token:\n- ").strip()
-    config["qobuz"]["genius_token"] = genius_token
+    config["qobuz"]["genius_token"] = "" if _keyring_save("genius_token", genius_token) else genius_token
 
     config["qobuz"]["directory"] = (
         input("Download folder (press Enter for 'Qobuz Downloads')\n- ")
@@ -242,7 +262,8 @@ def _handle_commands(qobuz, arguments):
 def _initial_checks():
     if not os.path.isdir(CONFIG_PATH) or not os.path.isfile(CONFIG_FILE):
         os.makedirs(CONFIG_PATH, exist_ok=True)
-        _reset_config(CONFIG_FILE)
+        if "-r" not in sys.argv and "--reset" not in sys.argv:
+            _reset_config(CONFIG_FILE)
 
     if len(sys.argv) < 2:
         sys.exit(qobuz_dl_args().print_help())
@@ -311,11 +332,25 @@ def main():
         section = "qobuz" if config.has_section("qobuz") else "DEFAULT"
         
         email = config.get(section, "email")
-        token = config.get(section, "auth_token", fallback="")
+        ini_token = config.get(section, "auth_token", fallback="")
+        token = _keyring_load("auth_token") or ini_token
         password = token if token else config.get(section, "password")
-        
+
         fetch_lyrics = config.getboolean(section, "fetch_lyrics", fallback=False)
-        genius_token = config.get(section, "genius_token", fallback=None)
+        ini_genius = config.get(section, "genius_token", fallback=None)
+        genius_token = _keyring_load("genius_token") or ini_genius
+
+        migrated = False
+        for k, v in (("auth_token", ini_token), ("genius_token", ini_genius)):
+            if v and _keyring_save(k, v):
+                config.set(section, k, "")
+                migrated = True
+        if migrated:
+            try:
+                with open(CONFIG_FILE, "w") as f:
+                    config.write(f)
+            except OSError:
+                pass
         
         # --- FIX: Backward compatibility for default_folder ---
         directory_val = config.get(section, "directory", fallback=None)
