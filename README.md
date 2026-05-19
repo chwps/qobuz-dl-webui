@@ -29,6 +29,7 @@ Search, explore, and download Lossless and Hi-Res music from [Qobuz](https://www
 * **Terminal Recovery (Raw Mode Fix):** Resolved a critical UI bug where interrupting the interactive search prompt (`fun` mode) with `CTRL+C` would leave the OS terminal in a broken state. The engine now safely triggers a graceful system exit, restoring the terminal's default line discipline.
 * **Smart Quality Fallback:** Automatically downgrades to the next best available quality if the requested tier is restricted by the server, ensuring your download queue never crashes.
 * **Authentication Bypass:** Log in securely using your browser's **Auth Token** if standard password authentication is blocked. Graciously handles Free/Studio accounts.
+* **Secure Credential Storage (OS Keyring):** Say goodbye to plaintext passwords. Authentication tokens (Qobuz and Genius) are now securely encrypted and stored natively in your operating system's credential manager (Windows Credential Manager, macOS Keychain, or Linux Secret Service). Existing users will be seamlessly and silently migrated on their next run. Running on a headless NAS or Docker? The engine gracefully falls back to the legacy `config.ini` storage without crashing.
 * **Anti-Ban Stealth Spoofing:** Modern WAF (Web Application Firewalls) block API requests originating from headless scripts. This engine features full cryptographic stealth spoofing, injecting exact Windows/Chrome Client Hints (`Sec-Ch-Ua`, `Sec-Fetch-Site`) to make your session completely indistinguishable from a legitimate user navigating the Qobuz Web Player, significantly reducing 403 errors and preventing account bans.
 * **Limitless Playlists:** Overcomes Qobuz API restrictions by dynamically paginating chunk requests, allowing you to seamlessly queue and download massive playlists without the standard 50-track bottleneck.
 * **Smart Resume (No Overwrites):** Intelligently detects existing files on your local drive and automatically skips them. If a massive discography download gets interrupted, it resumes instantly without wasting time or bandwidth re-downloading existing tracks.
@@ -148,6 +149,8 @@ legacy_charmap = false
 no_lrc_files = true
 ```
 *(Note: If you are upgrading from an older version, the legacy `default_folder` key is still fully supported for backward compatibility.)*
+
+> **🔒 Security Note:** Your `auth_token` and `genius_token` will no longer be visible in your `config.ini`. The Ultimate Edition automatically migrates and encrypts them into your OS-level secure credential manager (Keyring) to protect your accounts.
 
 ### 🔑 How to get your Auth Token
 Since Qobuz blocked direct password logins for third-party applications, you need to provide your browser's Auth Token during the initial configuration. Here is how to easily find it:
