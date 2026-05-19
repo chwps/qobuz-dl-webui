@@ -29,7 +29,8 @@ requirements = [
     "beautifulsoup4",
     "colorama",
     # NOTE: cryptography was used in the original downloader, keeping it for safety
-    "cryptography", 
+    "cryptography",
+    "keyring",
 ]
 
 setup(
