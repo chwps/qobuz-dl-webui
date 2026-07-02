@@ -282,6 +282,11 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         help="don't add genre tag"
     )
     tag_group.add_argument(
+        "--no-replaygain-tag",
+        action="store_true",
+        help="Do not add ReplayGain tags to the audio files.",
+    )
+    tag_group.add_argument(
         "--no-track-number-tag",
         action="store_true",
         help="don't add track number tag"

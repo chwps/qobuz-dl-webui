@@ -358,15 +358,16 @@ def _get_tags_to_add(qobuz_album: dict, qobuz_item : dict, settings: QobuzDLSett
         tags["ITUNESADVISORY"] = "1" if qobuz_album.get("parental_warning", False) else "0"
 
     # --- REPLAYGAIN TAGS ---
-    audio_info = qobuz_item.get("audio_info", {})
-    if audio_info:
-        rg_gain = audio_info.get("replaygain_track_gain")
-        rg_peak = audio_info.get("replaygain_track_peak")
-        
-        if rg_gain is not None:
-            tags["REPLAYGAIN_TRACK_GAIN"] = f"{rg_gain} dB"
-        if rg_peak is not None:
-            tags["REPLAYGAIN_TRACK_PEAK"] = str(rg_peak)
+    if not getattr(settings, 'no_replaygain_tag', False):
+        audio_info = qobuz_item.get("audio_info", {})
+        if audio_info:
+            rg_gain = audio_info.get("replaygain_track_gain")
+            rg_peak = audio_info.get("replaygain_track_peak")
+            
+            if rg_gain is not None:
+                tags["REPLAYGAIN_TRACK_GAIN"] = f"{rg_gain} dB"
+            if rg_peak is not None:
+                tags["REPLAYGAIN_TRACK_PEAK"] = str(rg_peak)
 
     # --- CLASSICAL MUSIC TAGS ---
     work = qobuz_item.get("work")
