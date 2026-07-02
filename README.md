@@ -18,6 +18,7 @@ Search, explore, and download Lossless and Hi-Res music from [Qobuz](https://www
 * **Enhanced Digital Booklets:** Automatically compiles a beautifully formatted `.txt` file with a complete tracklist, runtime, full credits, metadata, and reviews. Upon completion, the engine intelligently sweeps the folder, strips timestamps from `.lrc` files, and appends the pure text lyrics of the entire album directly into the booklet. Official PDF "Goodies" are also downloaded alongside it. **You can now use the `--booklet-only` flag to exclusively download these metadata files, cover art, and PDFs while gracefully skipping all heavy audio tracks.**
 * **Composer Field Fix:** Meticulously extracts every individual composer from the full performer string, ending the issue of truncated or "random" composer metadata.
 * **Smart Date Formatting:** Standardizes release dates to single, clean entries, preventing duplicate year/date tag conflicts in playback software.
+* **Bit-Perfect & Purist Mode:** Completely disable ReplayGain and Peak volume tags using the `--no-replaygain-tag` CLI flag (or `no_replaygain_tag = true` in config). This ensures your audio files remain strictly bit-perfect and untouched by any software volume-leveling instructions, ideal for high-end DACs and dedicated DAPs.
 
 ### 🚀 Resilient Download Engine
 * **Bulletproof Queue:** Advanced track-level exception handling. If a single track is geo-blocked or missing from the servers (404 error), the engine gracefully skips it and seamlessly continues downloading the rest of your album or playlist without crashing.
@@ -142,6 +143,7 @@ The fastest way to download directly to your Google Drive at Gigabit speeds, byp
 If you want to set a custom download folder, you can edit your `config.ini` file and use the `directory` key. Absolute paths and the `~` operator (for macOS/Linux) are fully supported!
 
 > **💡 Tip for Upgrading Users:** To access the latest configuration options (like `embed_lyrics` and `multi_value_tags`), simply run `qobuz-dl -r` to reset and regenerate a fresh `config.ini` file, or manually append them under the `[qobuz]` section.
+
 ```ini
 [qobuz]
 directory = ~/Music/Qobuz_Lossless
@@ -151,6 +153,9 @@ legacy_charmap = false
 
 # Set to 'true' to disable external .lrc file generation (lyrics will only be embedded in FLAC/MP3 tags)
 no_lrc_files = true
+
+# Set to 'true' to strictly disable ReplayGain volume tags for bit-perfect hardware playback
+no_replaygain_tag = true
 ```
 *(Note: If you are upgrading from an older version, the legacy `default_folder` key is still fully supported for backward compatibility.)*
 
@@ -255,6 +260,11 @@ python -m qobuz_dl dl [https://play.qobuz.com/artist/2038380](https://play.qobuz
 *(Tip: In interactive mode, use `Space` to multi-select several albums to download at once!)*
 ```bash
 python -m qobuz_dl fun -l 10
+```
+**Audiophile Purist Mode (No ReplayGain):**
+Download a track keeping the file strictly bit-perfect without writing any volume-leveling tags (useful for hardware DSPs and DAPs).
+```bash
+python -m qobuz_dl dl "URL" --no-replaygain-tag
 ```
 
 ### 🗄️ Database & Library Management
