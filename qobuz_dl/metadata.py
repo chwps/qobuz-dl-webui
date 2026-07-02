@@ -48,6 +48,45 @@ ID3_LEGEND = {
 
 EMB_COVER_NAME = "embed_cover.jpg"
 
+LOCAL_GENRE_MAP = {
+    # Elettronica & Dance
+    "Électronique": "Electronic",
+    "Ambiance": "Ambient",
+    
+    # Classica & Strumentale
+    "Classique": "Classical",
+    "Musique de chambre": "Chamber Music",
+    "Opéra": "Opera",
+    "Chorale": "Choral",
+    "Symphonique": "Symphonic",
+    
+    # Colonne Sonore & Media
+    "Bande Originale": "Soundtrack",
+    "Musique de film": "Soundtrack",
+    "Comédie Musicale": "Musical",
+    "Bande originale de jeu vidéo": "Video Game Soundtrack",
+    
+    # Jazz & Blues
+    "Jazz Vocal": "Vocal Jazz",
+    "Jazz Contemporain": "Contemporary Jazz",
+    
+    # World Music & Regionali
+    "Musiques du monde": "World",
+    "Musique celtique": "Celtic",
+    "Musique latine": "Latin",
+    "Variété Française": "French Pop",
+    "Alternatif et Indé": "Alternative & Indie",
+        
+    # Varie
+    "Enfants": "Children's Music",
+    "Berceuses": "Lullabies",
+    "Poésie et Littérature": "Spoken Word",
+    "Livres Audio": "Audiobooks",
+    "Humour": "Comedy",
+    "Religieux": "Religious",
+    "Détente": "Relaxation",
+    "Fêtes": "Holiday",
+}
 
 def _get_title_with_version(title: str = "", version: str = "") -> str:
     item_title = title
@@ -234,9 +273,15 @@ def _get_tags_to_add(qobuz_album: dict, qobuz_item : dict, settings: QobuzDLSett
         
         performers_str = qobuz_item.get("performers", "")
         if performers_str:
-            for i in performers_str.split(" - "):
-                if "FeaturedArtist" in i:
-                    artists.append(i.replace(", FeaturedArtist", "").strip())
+            for performer_block in performers_str.split(" - "):
+                parts = [p.strip() for p in performer_block.split(", ")]
+                if len(parts) > 1:
+                    name = parts[0]
+                    roles = parts[1:]
+                    
+                    if "FeaturedArtist" in roles or "MainArtist" in roles:
+                        if name not in artists:
+                            artists.append(name)
         
         if len(artists) == 1:
             tags["ARTIST"] = artists[0]
@@ -246,15 +291,57 @@ def _get_tags_to_add(qobuz_album: dict, qobuz_item : dict, settings: QobuzDLSett
             tags["ARTIST"] = ""
 
     if not settings.no_composer_tag:
-        tags["COMPOSER"] = qobuz_item.get("composer", {}).get("name", "")
+        composers = []
+        performers_str = qobuz_item.get("performers", "")
+        
+        if performers_str:
+            for performer_block in performers_str.split(" - "):
+                parts = [p.strip() for p in performer_block.split(", ")]
+                if len(parts) > 1:
+                    name = parts[0]
+                    roles = parts[1:]
+                    
+                    if "Composer" in roles or "ComposerLyricist" in roles:
+                        if name not in composers:
+                            composers.append(name)
+                            
+        if not composers:
+            main_composer = qobuz_item.get("composer", {}).get("name", "")
+            if main_composer:
+                composers.append(main_composer)
+
+        if len(composers) == 1:
+            tags["COMPOSER"] = composers[0]
+        elif len(composers) > 1:
+            tags["COMPOSER"] = composers
+        else:
+            tags["COMPOSER"] = ""
 
     # Release Information
     release_date = qobuz_album.get("release_date_original", "")
     if not settings.no_release_date_tag:
-        tags["DATE"] = release_date
-        tags["YEAR"] = release_date[:4] if release_date else ""
+        tags["DATE"] = release_date        
     if not settings.no_genre_tag:
-        tags["GENRE"] = _format_genres(qobuz_album.get("genres_list", []))
+        raw_main_genre = qobuz_album.get("genre", {}).get("name")
+        main_genre = LOCAL_GENRE_MAP.get(raw_main_genre, raw_main_genre) if raw_main_genre else None
+        
+        raw_genres = qobuz_album.get("genres_list", [])
+        if main_genre:
+            if raw_genres:
+                raw_genres[0] = main_genre
+            else:
+                raw_genres = [main_genre]
+                
+        extracted_genres = re.findall(r"([^\u2192\/]+)", "/".join(raw_genres))
+        
+        final_genres = []
+        for g in extracted_genres:
+            clean_g = g.strip()
+            translated = LOCAL_GENRE_MAP.get(clean_g, clean_g)
+            if translated not in final_genres:
+                final_genres.append(translated)
+                
+        tags["GENRE"] = ", ".join(final_genres)
     if not settings.no_label_tag:
         tags["COPYRIGHT"] = _format_copyright(qobuz_album.get("copyright", "n/a"))
     if not settings.no_label_tag:

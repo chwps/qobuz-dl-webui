@@ -550,7 +550,7 @@ class Download:
         if not os.path.exists(root_dir):
             os.makedirs(root_dir, exist_ok=True)
 
-        filename = os.path.join(root_dir, f".{tmp_count:02}.tmp")
+        filename = os.path.join(root_dir, f"~tmp_{tmp_count:02}.tmp")
         track_title = track_metadata.get("title")
         track_no = str(track_metadata.get('track_number', 0)).zfill(2)
         desc = f"{track_no}. {track_title}"
@@ -877,7 +877,8 @@ class Download:
         artist_name = _safe_get(meta, "artist", "name", default="Unknown Artist")
         composer = _safe_get(meta, "composer", "name", default="N/A")
         label = _safe_get(meta, "label", "name", default="Independent")
-        genre = _safe_get(meta, "genre", "name", default="Unknown Genre")
+        raw_genre = _safe_get(meta, "genre", "name", default="Unknown Genre")
+        genre = metadata.LOCAL_GENRE_MAP.get(raw_genre, raw_genre) if raw_genre != "Unknown Genre" else raw_genre
         release_date = meta.get("release_date_original", "Unknown Date")
         
         try:

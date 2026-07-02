@@ -213,12 +213,13 @@ def _reset_config(config_file):
     
 
 def _remove_leftovers(directory):
-    directory = os.path.join(directory, "**", ".*.tmp")
-    for i in glob.glob(directory, recursive=True):
-        try:
-            os.remove(i)
-        except:  # noqa
-            pass
+    for pattern in [".*.tmp", "~tmp_*.tmp"]:
+        search_dir = os.path.join(directory, "**", pattern)
+        for i in glob.glob(search_dir, recursive=True):
+            try:
+                os.remove(i)
+            except:  # noqa
+                pass
 
 
 def _handle_commands(qobuz, arguments):

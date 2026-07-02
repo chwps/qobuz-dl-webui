@@ -11,10 +11,13 @@ Search, explore, and download Lossless and Hi-Res music from [Qobuz](https://www
 * **Roon & DAP Optimized:** Metadata, cover art, and lyrics are meticulously formatted to ensure perfect out-of-the-box integration with Roon servers and Digital Audio Players.
 * **Roon-Ready Synchronized Lyrics:** The engine intelligently formats and embeds timestamped `.lrc` data directly into the audio files (`[LYRICS]` Vorbis Comments), ensuring Roon natively displays scrolling, karaoke-style lyrics in its "Now Playing" view out-of-the-box. If you prefer a minimalist, clutter-free folder structure, you can disable the generation of external `.lrc` files entirely via CLI (`--no-lrc-files`). Conversely, if you prefer external files without bloating your audio metadata, use the new `--no-embed-lyrics` flag (or set `embed_lyrics = false` in your config).
 * **Massive Tag Control:** Refactored tag engine supports highly detailed classical music metadata. Almost every single tag can be toggled on/off via CLI arguments.
-* **Native Multi-Artist & Multi-Value Tagging:** Automatically detects and splits main artists and featured guests. With the new `--multi-tags` CLI flag (or `multi_value_tags = true` in config), the engine also intelligently splits comma-separated metadata (like multiple genres: "Pop, Indie") into true discrete multi-value tags for FLAC (Vorbis Comments) and MP3 (ID3v2.4), ensuring flawless interpretation by high-end players like Roon, MusicBee, or Plexamp.
+* **Smart Genre Translation:** Automatically translates stubborn French genres (e.g., *Électronique*, *Bande Originale*) into standard English, ensuring your library remains consistent and searchable.
+* **Native Multi-Artist & Multi-Value Tagging & Deep Performer Parsing:** Automatically detects and splits main artists, featured guests, and extracts *all* composers/lyricists from complex Qobuz metadata strings. With the new `--multi-tags` CLI flag, the engine intelligently splits comma-separated metadata into discrete multi-value tags for FLAC (Vorbis Comments) and MP3 (ID3v2.4), ensuring flawless library interpretation by high-end players like Roon, MusicBee, or Plexamp.
 * **Native ReplayGain Support:** Automatically extracts and embeds `REPLAYGAIN_TRACK_GAIN` and `REPLAYGAIN_TRACK_PEAK` tags directly from Qobuz's hidden API data. This ensures perfect, non-destructive volume leveling out-of-the-box for high-end digital audio players (DAPs) and audiophile servers like Roon.
 * **Automatic Lyrics Engine & Retroactive Tagger:** Fetches and injects synchronized (`.lrc`) and unsynchronized lyrics using LRCLIB (with a Genius fallback API). Includes a standalone `lyrics` command to retroactively scan and inject missing lyrics into your existing local library without re-downloading the audio.
 * **Enhanced Digital Booklets:** Automatically compiles a beautifully formatted `.txt` file with a complete tracklist, runtime, full credits, metadata, and reviews. Upon completion, the engine intelligently sweeps the folder, strips timestamps from `.lrc` files, and appends the pure text lyrics of the entire album directly into the booklet. Official PDF "Goodies" are also downloaded alongside it. **You can now use the `--booklet-only` flag to exclusively download these metadata files, cover art, and PDFs while gracefully skipping all heavy audio tracks.**
+* **Composer Field Fix:** Meticulously extracts every individual composer from the full performer string, ending the issue of truncated or "random" composer metadata.
+* **Smart Date Formatting:** Standardizes release dates to single, clean entries, preventing duplicate year/date tag conflicts in playback software.
 
 ### 🚀 Resilient Download Engine
 * **Bulletproof Queue:** Advanced track-level exception handling. If a single track is geo-blocked or missing from the servers (404 error), the engine gracefully skips it and seamlessly continues downloading the rest of your album or playlist without crashing.
@@ -37,6 +40,7 @@ Search, explore, and download Lossless and Hi-Res music from [Qobuz](https://www
 * **Stateful Batch Downloading (Text File Memory):** When downloading massive queues from a `.txt` file, the engine acts as a living database. It automatically validates URLs and appends a `[DONE]` tag next to completed links directly inside your text file. If your connection drops or you abort the process, simply re-run the command: the engine will instantly skip the completed links and seamlessly resume the queue exactly where it left off.
 * **Flawless `.m3u` Generation:** Automatically generates playlist files with correct relative folder paths. **v2.0.1 features a robust 4-pass matching algorithm** (ID -> ISRC -> Title -> Filename) that guarantees the `.m3u` file perfectly mirrors the API order, even when tracks have no numerical prefixes in their filenames.
 * **Ultra-Fast O(1) Matching Engine:** The playlist generator now uses high-performance dictionary indexing. It identifies local files instantly, reducing the processing time for massive playlists from seconds to milliseconds. (Thanks to marrobHD)
+* **NAS & macOS Friendly Temporary Files:** Temporary download files now use a standard `~tmp_` prefix instead of a leading dot. This prevents Unix-based systems (macOS, Synology SMB/Samba) from permanently applying "Hidden" system attributes to your audio files, eliminating the need for terminal cleanup commands.
 
 ### 📁 Advanced Formatting & Storage
 
@@ -221,6 +225,12 @@ python -m qobuz_dl dl <URL> --delay 1
 If you have set `no_credits = true` in your `config.ini` to keep your folders clean, you can temporarily override this behavior to force the generation of the Digital Booklet and Tracklist.txt for a specific masterpiece.
 ```bash
 python -m qobuz_dl dl <URL> --with-credits
+```
+
+**Multi-Tag & Performer Parsing:**
+Use the `--multi-tags` flag to ensure that complex tracks with multiple artists and composers are split into clean, individual fields in your audio tags.
+```bash
+python -m qobuz_dl dl "URL" --multi-tags
 ```
 
 **Metadata & Booklet Only Mode:**
