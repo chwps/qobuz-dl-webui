@@ -35,8 +35,9 @@ ID3_LEGEND = {
     "year": id3.TYER,
     "performer": id3.TOPE,
     # --- DB SYNC FEATURE: CUSTOM QOBUZ IDS ---
-    "QOBUZTRACKID": id3.TXXX,
-    "QOBUZALBUMID": id3.TXXX,
+    "QOBUZ TRACK ID": id3.TXXX,
+    "QOBUZ ALBUM ID": id3.TXXX,
+    "QOBUZ ALBUM URL": id3.TXXX,
     # --- REPLAYGAIN ---
     "replaygain_track_gain": id3.TXXX,
     "replaygain_track_peak": id3.TXXX,
@@ -210,6 +211,9 @@ def tag_flac(
     if em_image:
         _embed_flac_img(root_dir, audio)
 
+    audio.pop("ENCODEDBY", None)
+    audio.pop("ENCODER", None)
+
     audio.save()
     os.rename(filename, final_name)
 
@@ -245,6 +249,9 @@ def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=Fal
 
     if em_image:
         _embed_id3_img(root_dir, audio)
+
+    audio.pop("TENC", None)
+    audio.pop("TSSE", None)
 
     audio.save(filename, v2_version=3)
     os.rename(filename, final_name)
@@ -402,10 +409,13 @@ def _get_tags_to_add(qobuz_album: dict, qobuz_item : dict, settings: QobuzDLSett
     # --- DB SYNC FEATURE: SAVE QOBUZ IDS ---
     track_id = qobuz_item.get("id")
     if track_id:
-        tags["QOBUZTRACKID"] = str(track_id)
+        tags["QOBUZ TRACK ID"] = str(track_id)
         
     album_id = qobuz_album.get("id")
     if album_id:
-        tags["QOBUZALBUMID"] = str(album_id)
+        tags["QOBUZ ALBUM ID"] = str(album_id)
+        
+        if not getattr(settings, 'no_album_url_tag', False):
+            tags["QOBUZ ALBUM URL"] = f"https://open.qobuz.com/album/{album_id}"
 
     return tags

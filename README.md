@@ -9,6 +9,7 @@ Search, explore, and download Lossless and Hi-Res music from [Qobuz](https://www
 
 ### 🎧 Audiophile & Metadata Engine
 * **Roon & DAP Optimized:** Metadata, cover art, and lyrics are meticulously formatted to ensure perfect out-of-the-box integration with Roon servers and Digital Audio Players.
+* **Direct Album URL Tagging:** Automatically generates and embeds a direct, clickable `QOBUZ ALBUM URL` link directly into the track's metadata (Vorbis Comments for FLAC, `TXXX` frame for MP3). This allows one-click access to the original Qobuz album page directly from tag-editors like Mp3tag or compatible audiophile players. You can optionally disable this non-standard tag using the `--no-album-url-tag` flag (or `no_album_url_tag = true` in config).
 * **Roon-Ready Synchronized Lyrics:** The engine intelligently formats and embeds timestamped `.lrc` data directly into the audio files (`[LYRICS]` Vorbis Comments), ensuring Roon natively displays scrolling, karaoke-style lyrics in its "Now Playing" view out-of-the-box. If you prefer a minimalist, clutter-free folder structure, you can disable the generation of external `.lrc` files entirely via CLI (`--no-lrc-files`). Conversely, if you prefer external files without bloating your audio metadata, use the new `--no-embed-lyrics` flag (or set `embed_lyrics = false` in your config).
 * **Massive Tag Control:** Refactored tag engine supports highly detailed classical music metadata. Almost every single tag can be toggled on/off via CLI arguments.
 * **Smart Genre Translation:** Automatically translates stubborn French genres (e.g., *Électronique*, *Bande Originale*) into standard English, ensuring your library remains consistent and searchable.
@@ -156,6 +157,9 @@ no_lrc_files = true
 
 # Set to 'true' to strictly disable ReplayGain volume tags for bit-perfect hardware playback
 no_replaygain_tag = true
+
+# Set to 'true' to disable writing the non-standard "QOBUZ ALBUM URL" tag into the files
+no_album_url_tag = true
 ```
 *(Note: If you are upgrading from an older version, the legacy `default_folder` key is still fully supported for backward compatibility.)*
 
@@ -185,7 +189,7 @@ usage: python -m qobuz_dl dl [-h] [-d PATH] [-q int] [--albums-only] [--no-m3u] 
                              [--saved-art-size {50,100,150,300,600,max,org}] 
                              [--multiple-disc-prefix PREFIX] [--multiple-disc-one-dir] 
                              [--no-lyrics] [--no-lrc-files] [--native-lang] [--no-credits] [--with-credits] [--booklet-only] [--delay SECONDS]
-                             [--no-album-artist-tag] [--no-track-composer-tag] ... 
+                             [--no-album-artist-tag] [--no-track-composer-tag] [--no-replaygain-tag] [--no-album-url-tag] ... 
                              SOURCE [SOURCE ...]
 ```
 

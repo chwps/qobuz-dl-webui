@@ -287,6 +287,11 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         help="Do not add ReplayGain tags to the audio files.",
     )
     tag_group.add_argument(
+        "--no-album-url-tag",
+        action="store_true",
+        help="Do not add the QOBUZ ALBUM URL tag to the audio files.",
+    )
+    tag_group.add_argument(
         "--no-track-number-tag",
         action="store_true",
         help="don't add track number tag"

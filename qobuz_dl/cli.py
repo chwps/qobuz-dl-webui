@@ -187,6 +187,7 @@ def _reset_config(config_file):
     config["qobuz"]["no_disc_total_tag"] = "false"
     config["qobuz"]["no_composer_tag"] = "false"
     config["qobuz"]["no_replaygain_tag"] = "false"
+    config["qobuz"]["no_album_url_tag"] = "false"
     
     config["qobuz"]["no_explicit_tag"] = "false"
     config["qobuz"]["no_copyright_tag"] = "false"
