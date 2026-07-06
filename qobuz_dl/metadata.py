@@ -339,7 +339,7 @@ def _get_tags_to_add(qobuz_album: dict, qobuz_item : dict, settings: QobuzDLSett
             else:
                 raw_genres = [main_genre]
                 
-        extracted_genres = re.findall(r"([^\u2192\/]+)", "/".join(raw_genres))
+        extracted_genres = re.findall(r"([^\u2192]+)", " \u2192 ".join(raw_genres))
         
         final_genres = []
         for g in extracted_genres:
@@ -409,13 +409,17 @@ def _get_tags_to_add(qobuz_album: dict, qobuz_item : dict, settings: QobuzDLSett
     # --- DB SYNC FEATURE: SAVE QOBUZ IDS ---
     track_id = qobuz_item.get("id")
     if track_id:
-        tags["QOBUZ TRACK ID"] = str(track_id)
+        tags["QOBUZTRACKID"] = str(track_id)
         
     album_id = qobuz_album.get("id")
     if album_id:
-        tags["QOBUZ ALBUM ID"] = str(album_id)
-        
-        if not getattr(settings, 'no_album_url_tag', False):
-            tags["QOBUZ ALBUM URL"] = f"https://open.qobuz.com/album/{album_id}"
+        tags["QOBUZALBUMID"] = str(album_id)
+
+    # --- DIRECT ALBUM URL TAGGING ---
+    if not getattr(settings, 'no_album_url_tag', False):
+        if album_id:
+            raw_title = str(qobuz_album.get("title", "album"))
+            slug = re.sub(r'[^a-z0-9]+', '-', raw_title.lower()).strip('-')
+            tags["QOBUZ ALBUM URL"] = f"https://www.qobuz.com/album/{slug}/{album_id}"
 
     return tags
