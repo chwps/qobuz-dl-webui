@@ -123,16 +123,33 @@ def _reset_config(config_file):
     auth_token = input("Paste your browser token here:\n- ").strip()
 
     config["qobuz"]["password"] = ""
-    config["qobuz"]["auth_token"] = "" if _keyring_save("auth_token", auth_token) else auth_token
 
-    fetch_lyrics = input("Do you want to automatically download and inject lyrics? (yes/no) [Default: yes]\n- ").strip().lower()
+    # --- NEW KEYRING PROMPT ---
+    print(f"\n{YELLOW}[?] OS Keyring Security:{OFF}")
+    print("    By default, tokens are encrypted in your OS Credential Manager.")
+    print("    If you are on a headless Linux/NAS/Docker, this might fail silently.")
+    disable_kr = input("    Disable OS Keyring and save tokens in config.ini? (yes/no) [Default: no]\n- ").strip().lower()
+    
+    use_keyring = False if disable_kr in ['yes', 'y', 'true'] else True
+    config["qobuz"]["disable_keyring"] = "true" if not use_keyring else "false"
+
+    if use_keyring and _keyring_save("auth_token", auth_token):
+        config["qobuz"]["auth_token"] = ""
+    else:
+        config["qobuz"]["auth_token"] = auth_token
+
+    fetch_lyrics = input("\nDo you want to automatically download and inject lyrics? (yes/no) [Default: yes]\n- ").strip().lower()
     config["qobuz"]["fetch_lyrics"] = "false" if fetch_lyrics in ['no', 'n', 'false'] else "true"
     
     genius_token = ""
     if config["qobuz"]["fetch_lyrics"] == "true":
         print(f"{YELLOW}[!] To use Genius as a fallback, enter your API Token. Leave blank to only use LRCLIB (Free/No API).{OFF}")
         genius_token = input("Genius API Token:\n- ").strip()
-    config["qobuz"]["genius_token"] = "" if _keyring_save("genius_token", genius_token) else genius_token
+        
+    if use_keyring and _keyring_save("genius_token", genius_token):
+        config["qobuz"]["genius_token"] = ""
+    else:
+        config["qobuz"]["genius_token"] = genius_token
 
     config["qobuz"]["directory"] = (
         input("Download folder (press Enter for 'Qobuz Downloads')\n- ")
@@ -335,26 +352,37 @@ def main():
         section = "qobuz" if config.has_section("qobuz") else "DEFAULT"
         
         email = config.get(section, "email")
+        
+        # --- INIZIO PATCH KEYRING BYPASS ---
         ini_token = config.get(section, "auth_token", fallback="")
-        token = _keyring_load("auth_token") or ini_token
-        password = token if token else config.get(section, "password")
+        ini_genius = config.get(section, "genius_token", fallback="")
+        disable_keyring = str(config.get(section, "disable_keyring", fallback="false")).strip().lower() in ['true', 'yes', 'y', '1']
+
+        if disable_keyring:
+            token = ini_token
+            genius_token = ini_genius
+            password = config.get(section, "password", fallback="")
+        else:
+            token = _keyring_load("auth_token") or ini_token
+            password = token if token else config.get(section, "password", fallback="")
+            genius_token = _keyring_load("genius_token") or ini_genius
+
+            # Safe Migration Block
+            migrated = False
+            for k, v in (("auth_token", ini_token), ("genius_token", ini_genius)):
+                if v and _keyring_save(k, v):
+                    config.set(section, k, "")
+                    migrated = True
+            if migrated:
+                try:
+                    with open(CONFIG_FILE, "w") as f:
+                        config.write(f)
+                except OSError:
+                    pass
+        # --- FINE PATCH KEYRING BYPASS ---
 
         fetch_lyrics = config.getboolean(section, "fetch_lyrics", fallback=False)
-        ini_genius = config.get(section, "genius_token", fallback=None)
-        genius_token = _keyring_load("genius_token") or ini_genius
 
-        migrated = False
-        for k, v in (("auth_token", ini_token), ("genius_token", ini_genius)):
-            if v and _keyring_save(k, v):
-                config.set(section, k, "")
-                migrated = True
-        if migrated:
-            try:
-                with open(CONFIG_FILE, "w") as f:
-                    config.write(f)
-            except OSError:
-                pass
-        
         # --- FIX: Backward compatibility for default_folder ---
         directory_val = config.get(section, "directory", fallback=None)
         if directory_val is not None:
