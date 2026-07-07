@@ -716,6 +716,7 @@ class Download:
             "format": file_format,
             "bit_depth": bit_depth,
             "sampling_rate": sampling_rate,
+            "quality_tag": "MP3" if str(file_format).upper() == "MP3" else (f"{file_format} {bit_depth}" if bit_depth else file_format),
             "album_version": meta.get("version", ""),
             "version_tag": f" - {meta.get('version')}" if meta.get("version") else "",
             "disc_count": meta.get("media_count", ""),
@@ -754,6 +755,7 @@ class Download:
             "format": file_format,
             "bit_depth": bit_depth,
             "sampling_rate": sampling_rate,
+            "quality_tag": "MP3" if str(file_format).upper() == "MP3" else (f"{file_format} {bit_depth}" if bit_depth else file_format),
             "album_version": meta.get("version", ""),
             "version_tag": f" - {meta.get('version')}" if meta.get("version") else "",
             "disc_count": meta.get("media_count", 1),
@@ -794,7 +796,9 @@ class Download:
                 if any(restriction.get("code") == QL_DOWNGRADE for restriction in restrictions):
                     quality_met = False
 
-            return ("FLAC", quality_met, new_track_dict["bit_depth"], new_track_dict["sampling_rate"])
+            actual_format = "MP3" if int(self.quality) == 5 else "FLAC"
+
+            return (actual_format, quality_met, new_track_dict["bit_depth"], new_track_dict["sampling_rate"])
             
         except (KeyError, requests.exceptions.HTTPError, Exception):
             # In caso di errore (geoblocco, traccia non disponibile, ecc.), restituiamo i valori None
@@ -1096,11 +1100,7 @@ def _clean_format_str(folder: str, track: str, file_format: str) -> Tuple[str, s
         if fs.endswith(".mp3"): fs = fs[:-4]
         elif fs.endswith(".flac"): fs = fs[:-5]
         fs = fs.strip()
-
-        if file_format in ("MP3", "Unknown") and ("bit_depth" in fs or "sampling_rate" in fs):
-            default = DEFAULT_FORMATS[file_format][i]
-            logger.error(f"{RED}invalid format string for format {file_format}. defaulting to {default}")
-            fs = default
+           
         final.append(fs)
     return tuple(final)
 

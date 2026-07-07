@@ -211,9 +211,10 @@ def tag_flac(
     if em_image:
         _embed_flac_img(root_dir, audio)
 
-    audio.pop("ENCODEDBY", None)
-    audio.pop("ENCODER", None)
-
+    for junk_tag in ["ENCODER", "encoded-by", "encoded_by", "vendor"]:
+        if junk_tag in audio:
+            del audio[junk_tag]
+            
     audio.save()
     os.rename(filename, final_name)
 
