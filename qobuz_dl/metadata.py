@@ -379,7 +379,7 @@ def _get_tags_to_add(qobuz_album: dict, qobuz_item : dict, settings: QobuzDLSett
 
     # --- CLASSICAL MUSIC TAGS ---
     work = qobuz_item.get("work")
-    if work:
+    if work and not getattr(settings, 'no_work_tag', False):
         tags["WORK"] = work
 
     conductors = []
@@ -401,9 +401,9 @@ def _get_tags_to_add(qobuz_album: dict, qobuz_item : dict, settings: QobuzDLSett
                 if any(role in roles for role in ["Orchestra", "Ensemble", "Choir"]):
                     ensembles.append(name)
 
-    if conductors:
+    if conductors and not getattr(settings, 'no_conductor_tag', False):
         tags["CONDUCTOR"] = conductors if len(conductors) > 1 else conductors[0]
-    if ensembles:
+    if ensembles and not getattr(settings, 'no_ensemble_tag', False):
         tags["ENSEMBLE"] = ensembles if len(ensembles) > 1 else ensembles[0]
     # ----------------------------
 

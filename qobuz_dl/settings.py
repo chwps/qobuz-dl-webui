@@ -33,6 +33,9 @@ class QobuzDLSettings:
         self.no_disc_number_tag = kwargs.get('no_disc_number_tag', False)
         self.no_disc_total_tag = kwargs.get('no_disc_total_tag', False)
         self.no_composer_tag = kwargs.get('no_composer_tag', False)
+        self.no_conductor_tag = kwargs.get('no_conductor_tag', False)
+        self.no_ensemble_tag = kwargs.get('no_ensemble_tag', False)
+        self.no_work_tag = kwargs.get('no_work_tag', False)
         self.no_explicit_tag = kwargs.get('no_explicit_tag', False)
         self.no_copyright_tag = kwargs.get('no_copyright_tag', False)
         self.no_label_tag = kwargs.get('no_label_tag', False)
@@ -122,6 +125,9 @@ class QobuzDLSettings:
             'no_disc_number_tag': arguments.no_disc_number_tag or config.getboolean(section, "no_disc_number_tag", fallback=False),
             'no_disc_total_tag': arguments.no_disc_total_tag or config.getboolean(section, "no_disc_total_tag", fallback=False),
             'no_composer_tag': arguments.no_composer_tag or config.getboolean(section, "no_composer_tag", fallback=False),
+            'no_conductor_tag': getattr(arguments, 'no_conductor_tag', False) or config.getboolean(section, "no_conductor_tag", fallback=False),
+            'no_ensemble_tag': getattr(arguments, 'no_ensemble_tag', False) or config.getboolean(section, "no_ensemble_tag", fallback=False),
+            'no_work_tag': getattr(arguments, 'no_work_tag', False) or config.getboolean(section, "no_work_tag", fallback=False),
             'no_explicit_tag': arguments.no_explicit_tag or config.getboolean(section, "no_explicit_tag", fallback=False),
             'no_copyright_tag': arguments.no_copyright_tag or config.getboolean(section, "no_copyright_tag", fallback=False),
             'no_label_tag': arguments.no_label_tag or config.getboolean(section, "no_label_tag", fallback=False),

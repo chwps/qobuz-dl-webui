@@ -170,6 +170,11 @@ no_replaygain_tag = true
 
 # Set to 'true' to disable writing the non-standard "QOBUZ ALBUM URL" tag into the files
 no_album_url_tag = true
+
+# Set to 'true' to disable classical music metadata extraction
+no_conductor_tag = true
+no_ensemble_tag = true
+no_work_tag = true
 ```
 *(Note: If you are upgrading from an older version, the legacy `default_folder` key is still fully supported for backward compatibility.)*
 
@@ -199,7 +204,7 @@ usage: python -m qobuz_dl dl [-h] [-d PATH] [-q int] [--albums-only] [--no-m3u] 
                              [--saved-art-size {50,100,150,300,600,max,org}] 
                              [--multiple-disc-prefix PREFIX] [--multiple-disc-one-dir] 
                              [--no-lyrics] [--no-lrc-files] [--native-lang] [--no-credits] [--with-credits] [--booklet-only] [--delay SECONDS]
-                             [--no-album-artist-tag] [--no-track-composer-tag] [--no-replaygain-tag] [--no-album-url-tag] ... 
+                             [--no-album-artist-tag] [--no-track-composer-tag] [--no-conductor-tag] [--no-ensemble-tag] [--no-work-tag] [--no-replaygain-tag] [--no-album-url-tag] ... 
                              SOURCE [SOURCE ...]
 ```
 
