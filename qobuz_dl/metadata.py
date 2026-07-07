@@ -211,10 +211,13 @@ def tag_flac(
     if em_image:
         _embed_flac_img(root_dir, audio)
 
-    for junk_tag in ["ENCODER", "encoded-by", "encoded_by", "vendor"]:
+    for junk_tag in ["ENCODER", "ENCODED-BY", "ENCODED_BY"]:
         if junk_tag in audio:
             del audio[junk_tag]
             
+    if hasattr(audio, 'tags') and audio.tags is not None:
+        audio.tags.vendor = ""
+
     audio.save()
     os.rename(filename, final_name)
 
