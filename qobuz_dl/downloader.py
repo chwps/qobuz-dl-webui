@@ -887,8 +887,12 @@ class Download:
         
         try:
             with open(tracklist_path, "w", encoding="utf-8") as f:
+                explicit_tag = " [E]" if meta.get("parental_warning") else ""
+                
                 f.write("=" * 70 + "\n")
-                f.write(f"ALBUM      : {album_title}\n")
+                
+                f.write(f"ALBUM      : {album_title}{explicit_tag}\n")
+                
                 if composer != "N/A": f.write(f"COMPOSER   : {composer}\n")
                 f.write(f"MAIN ART.  : {artist_name}\n")
                 f.write(f"LABEL      : {label}\n")
