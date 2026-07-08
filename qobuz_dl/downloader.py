@@ -909,7 +909,10 @@ class Download:
                         current_disc = disc_num
 
                     t_num = str(track.get("track_number", 0)).zfill(2)
-                    t_title = track.get("title", "Unknown Title")
+                    t_title_base = track.get("title", "Unknown Title")
+                    explicit_flag = " [E]" if track.get("parental_warning") else ""
+                    t_title = f"{t_title_base}{explicit_flag}"
+                    
                     duration = int(track.get("duration", 0))
                     mins, secs = divmod(duration, 60)
                     dur_str = f"[{mins:02}:{secs:02}]"

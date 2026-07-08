@@ -366,7 +366,7 @@ def _get_tags_to_add(qobuz_album: dict, qobuz_item : dict, settings: QobuzDLSett
     if not settings.no_media_type_tag:
         tags["MEDIATYPE"] = qobuz_album.get("product_type", "").upper()
     if not settings.no_explicit_tag:
-        tags["ITUNESADVISORY"] = "1" if qobuz_album.get("parental_warning", False) else "0"
+        tags["ITUNESADVISORY"] = "1" if qobuz_item.get("parental_warning", False) else ""
 
     # --- REPLAYGAIN TAGS ---
     if not getattr(settings, 'no_replaygain_tag', False):
