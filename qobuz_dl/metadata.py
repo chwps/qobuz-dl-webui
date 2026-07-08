@@ -218,7 +218,8 @@ def tag_flac(
     if hasattr(audio, 'tags') and audio.tags is not None:
         audio.tags.vendor = ""
 
-    audio.save()
+    audio.save(padding=lambda info: 8192)
+    
     os.rename(filename, final_name)
 
 
