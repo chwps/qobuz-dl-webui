@@ -361,9 +361,10 @@ def main():
         disable_keyring = str(config.get(section, "disable_keyring", fallback="false")).strip().lower() in ['true', 'yes', 'y', '1']
 
         if disable_keyring:
-            token = ini_token
+            ini_password = config.get(section, "password", fallback="")
+            token = ini_token if ini_token else ini_password
             genius_token = ini_genius
-            password = config.get(section, "password", fallback="")
+            password = ini_password
         else:
             token = _keyring_load("auth_token") or ini_token
             password = token if token else config.get(section, "password", fallback="")
