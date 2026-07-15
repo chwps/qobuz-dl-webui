@@ -181,6 +181,12 @@ class QobuzDL:
             return
         if type_dict["func"]:
             content = [item for item in type_dict["func"](item_id)]
+            
+            if not content:
+                logger.warning(
+                    f"{YELLOW}[!] Skipped URL: Content empty or unavailable (Geo-blocked/Removed). URL: {url}{OFF}"
+                )
+                return
             content_name = content[0]["name"]
             logger.info(
                 f"{YELLOW}Downloading all the music from {content_name} "
