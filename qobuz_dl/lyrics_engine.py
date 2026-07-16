@@ -15,8 +15,8 @@ class LyricsEngine:
         self.genius_token = genius_token
         self.genius = None
         if self.genius_token and lyricsgenius:
-            # Initialize Genius in silent mode (verbose=False)
-            self.genius = lyricsgenius.Genius(self.genius_token, verbose=False, remove_section_headers=True)
+            self.genius = lyricsgenius.Genius(self.genius_token, remove_section_headers=True)
+            self.genius.verbose = False
 
     def fetch_and_inject(self, file_path, artist, track, album, save_lrc=True, embed_lyrics=True):
         """Waterfall engine: first try LRCLIB (for LRC format), then Genius."""
