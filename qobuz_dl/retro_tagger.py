@@ -4,12 +4,16 @@ from mutagen.flac import FLAC
 import mutagen.id3 as id3
 from mutagen.id3 import ID3NoHeaderError
 
+from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.lyrics_engine import LyricsEngine
 from qobuz_dl.color import CYAN, GREEN, YELLOW, RED, OFF
 
 logger = logging.getLogger(__name__)
 
-def inject_lyrics_retroactively(directory_path, genius_token=None):
+def inject_lyrics_retroactively(directory_path, genius_token=None, settings=None):
+    if settings is None:
+        settings = QobuzDLSettings()
+        
     print(f"\n{CYAN}[*] Starting retroactive lyrics scan in: {directory_path}{OFF}")
     
     if not os.path.isdir(directory_path):
@@ -73,12 +77,14 @@ def inject_lyrics_retroactively(directory_path, genius_token=None):
                     if needs_lyrics:
                         print(f"{YELLOW}  > Missing lyrics: {artist} - {title}. Searching...{OFF}")
                         
-                        # Call the LyricsEngine
+                        # Call the LyricsEngine mapping user preferences
                         engine.fetch_and_inject(
                             file_path=file_path,
                             artist=artist,
                             track=title,
-                            album=album
+                            album=album,
+                            save_lrc=getattr(settings, 'lrc_files', True),
+                            embed_lyrics=getattr(settings, 'embed_lyrics', True)
                         )
                         injected += 1
                             

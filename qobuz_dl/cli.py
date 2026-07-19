@@ -481,7 +481,6 @@ def main():
     # ----------------------------------------------
 
     # --- RETRO LYRICS FEATURE (Standalone Mode) ---
-    # Intercept the command here before QobuzDLSettings looks for 'directory', which would crash the program
     if arguments.command == "lyrics":
         from qobuz_dl.retro_tagger import inject_lyrics_retroactively
         
@@ -490,15 +489,19 @@ def main():
             target_dir = os.path.abspath(target_dir)
             if not target_dir.startswith("\\\\?\\"):
                 target_dir = "\\\\?\\" + target_dir
+        
+        lrc_pref = not config.getboolean(section, "no_lrc_files", fallback=False)
+        embed_pref = config.getboolean(section, "embed_lyrics", fallback=True)
+        local_settings = QobuzDLSettings(lrc_files=lrc_pref, embed_lyrics=embed_pref)
                 
         try:
-            inject_lyrics_retroactively(target_dir, genius_token=genius_token)
+            inject_lyrics_retroactively(target_dir, genius_token=genius_token, settings=local_settings)
         except KeyboardInterrupt:
             print("\n\n\033[91m[!] Operation manually interrupted by the user (CTRL+C).\033[0m")
             print("\033[93mAlready processed files are safe. Exiting...\033[0m")
         sys.exit(0)
     # ----------------------------------------------
-
+    
     directory_to_use = arguments.directory if hasattr(arguments, 'directory') and arguments.directory else default_folder
     directory_to_use = os.path.expanduser(directory_to_use)
 
